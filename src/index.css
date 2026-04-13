@@ -1,0 +1,73 @@
+/**
+ * 全局 CSS 樣式
+ *
+ * 這個文件包含項目的全局樣式
+ * Tailwind CSS 4 的核心指令也在這裡導入
+ */
+
+/* 導入 Tailwind CSS 4 的所有樣式 */
+@import "tailwindcss";
+
+/**
+ * 全局基礎樣式
+ */
+@layer base {
+  /* 自訂全局字體設置 */
+  html {
+    @apply scroll-smooth;
+  }
+
+  body {
+    @apply bg-slate-50 text-slate-900 antialiased;
+  }
+
+  /* 標題樣式 */
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-semibold text-slate-900;
+  }
+}
+
+/**
+ * 自訂動畫定義
+ */
+@layer utilities {
+  /**
+   * 漸淡進入動畫
+   */
+  .animate-fade-in {
+    animation: fadeIn 0.5s ease-in;
+  }
+
+  /**
+   * 定義漸淡進入動畫
+   */
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  /**
+   * 上升進入動畫
+   */
+  .animate-slide-up {
+    animation: slideUp 0.5s ease-out;
+  }
+
+  /**
+   * 定義上升進入動畫
+   */
+  @keyframes slideUp {
+    from {
+      transform: translateY(10px);
+      opacity: 0;
+    }
+    to {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
+}
