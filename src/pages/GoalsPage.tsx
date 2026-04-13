@@ -545,7 +545,7 @@ export function GoalsPage() {
               {/* 目標金額 */}
               <div>
                 <label className="block text-sm font-medium text-slate-900 mb-1.5">
-                  目標金額 (TWD) *
+                  目標金額 (USD) *
                 </label>
                 <input
                   type="number"

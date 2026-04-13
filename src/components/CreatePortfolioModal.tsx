@@ -308,7 +308,7 @@ export function CreatePortfolioModal({
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-900 mb-2">
-                    目標金額 (TWD) *
+                    目標金額 (USD) *
                   </label>
                   <input
                     type="number"

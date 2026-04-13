@@ -162,7 +162,14 @@ class StockAPIService {
 
       if (data['Error Message']) throw new Error(`股票代碼不存在：${data['Error Message']}`)
       if (data['Note']) throw new Error(`API 請求頻率超過限制（免費版每分鐘 5 次），請稍後再試`)
-      if (data['Information']) throw new Error(`API 金鑰無效或未設定`)
+      if (data['Information']) {
+        const info: string = data['Information']
+        if (info.includes('rate limit') || info.includes('25 requests') || info.includes('daily'))
+          throw new Error(`API 每日請求次數已達上限（免費版每日 25 次），請明天再試或升級 API 方案`)
+        if (info.includes('premium'))
+          throw new Error(`此端點需要付費 API 金鑰，請至 alphavantage.co 升級方案`)
+        throw new Error(`API 金鑰無效或未設定，請確認 .env 中的 VITE_ALPHA_VANTAGE_API_KEY`)
+      }
 
       // 解析全局引號數據
       const quotes = data['Global Quote']
@@ -241,9 +248,17 @@ class StockAPIService {
     if (d['Note']) throw new Error(
       `API 請求頻率超過限制（免費版每分鐘 5 次）\n請等待約 1 分鐘後再試。`
     )
-    if (d['Information']) throw new Error(
-      `API 金鑰無效或未設定\n請在 .env 檔案中設定 VITE_ALPHA_VANTAGE_API_KEY。`
-    )
+    if (d['Information']) {
+      const info: string = d['Information']
+      if (info.includes('rate limit') || info.includes('25 requests') || info.includes('daily'))
+        throw new Error(`API 每日請求次數已達上限（免費版每日 25 次）\n請明天再試，或考慮升級 Alpha Vantage 付費方案`)
+      if (info.includes('premium'))
+        throw new Error(
+          `公司基本面（OVERVIEW）端點需要付費 API 金鑰\n` +
+          `免費金鑰目前無法使用此功能，請至 alphavantage.co 升級，或改用其他數據來源`
+        )
+      throw new Error(`API 金鑰無效或未設定\n請在 .env 檔案中設定 VITE_ALPHA_VANTAGE_API_KEY`)
+    }
     if (!d.Symbol) throw new Error(`找不到股票代碼：${symbol}，請確認是否為美股代碼`)
 
     // ETF 不提供個股基本面（無 EPS、ROE 等），無法進行巴菲特分析
