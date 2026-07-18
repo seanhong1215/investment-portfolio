@@ -1,119 +1,139 @@
 /**
- * 投資組合建立精靈
+ * 投資組合建立精靈 — 四步驟問卷產生個人化配置。
  *
- * 四步驟引導用戶建立屬於自己的投資組合：
- * Step 1：投資目標 + 年限
- * Step 2：風險承受度
- * Step 3：資金規劃
- * Step 4：專屬推薦方案 + 建立
+ * Step 1 目標與年限 → Step 2 風險評估 → Step 3 資金規劃 → Step 4 專屬方案。
+ * 所有推薦邏輯都在 domain/advisor.ts（純函數、有測試），本頁只負責蒐集
+ * 輸入與呈現結果。
  */
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
-  ChevronRight, ChevronLeft, Wand2, CheckCircle,
-  TrendingUp, AlertTriangle, Lightbulb, Target,
+  ArrowLeft, ArrowRight, Check, GraduationCap, Home, Landmark,
+  LineChart, Rocket, Scale, Shield, Sparkles, Target, TrendingUp, Umbrella, Wand2,
 } from 'lucide-react'
-import { cardClass } from '@/utils/classNames'
+import type { LucideIcon } from 'lucide-react'
 import {
-  InvestorProfile, InvestGoal, TimeHorizon, RiskLevel,
-  getRecommendation, GOAL_INFO, TIME_INFO, RISK_INFO,
-  PortfolioRecommendation, AllocationItem,
-} from '@/services/portfolioAdvisor'
-import { usePortfolio } from '@/hooks/usePortfolio'
+  getRecommendation,
+  GOAL_INFO, TIME_INFO, RISK_INFO,
+  type InvestGoal, type TimeHorizon, type RiskLevel,
+  type InvestorProfile, type PortfolioRecommendation, type AllocationItem,
+} from '@/domain/advisor'
 import { usePortfolioStore } from '@/stores/portfolioStore'
-import { useWatchlistStore } from '@/stores/watchlistStore'
-import { storageService } from '@/services/storage'
-import { Portfolio } from '@/types'
-
-// ===== 進度列 =====
+import { Button, Card, Badge, StatTile } from '@/components/ui'
+import { foldToSlots } from '@/components/charts/series'
+import { formatCurrency, formatPercent } from '@/utils/format'
+import { cn } from '@/utils/cn'
+import type { Portfolio, PortfolioItem } from '@/types'
 
 const STEPS = ['投資目標', '風險評估', '資金規劃', '專屬方案']
 
+const GOAL_ICONS: Record<InvestGoal, LucideIcon> = {
+  RETIREMENT: Umbrella,
+  HOME: Home,
+  FREEDOM: Rocket,
+  EDUCATION: GraduationCap,
+  EMERGENCY: Shield,
+}
+
+const RISK_ICONS: Record<RiskLevel, LucideIcon> = {
+  CONSERVATIVE: Shield,
+  BALANCED: Scale,
+  AGGRESSIVE: Rocket,
+}
+
+// ── 進度列 ──
+
 function StepBar({ current }: { current: number }) {
   return (
-    <div className="flex items-center justify-center gap-0 mb-8">
-      {STEPS.map((label, i) => (
-        <div key={i} className="flex items-center">
-          <div className="flex flex-col items-center">
-            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-all ${
-              i < current  ? 'bg-blue-600 text-white' :
-              i === current ? 'bg-blue-600 text-white ring-4 ring-blue-100' :
-              'bg-slate-200 text-slate-500'
-            }`}>
-              {i < current ? <CheckCircle className="w-4 h-4" /> : i + 1}
+    <ol className="mb-8 flex items-center justify-center">
+      {STEPS.map((label, i) => {
+        const done = i < current
+        const active = i === current
+        return (
+          <li key={label} className="flex items-center">
+            <div className="flex flex-col items-center">
+              <span
+                className={cn(
+                  'flex h-8 w-8 items-center justify-center rounded-full text-sm font-semibold transition-colors',
+                  done && 'bg-accent text-white',
+                  active && 'bg-accent text-white ring-4 ring-accent-wash',
+                  !done && !active && 'bg-surface-sunken text-ink-muted'
+                )}
+              >
+                {done ? <Check className="h-4 w-4" aria-hidden /> : i + 1}
+              </span>
+              <span className={cn('mt-1.5 text-xs', active ? 'font-medium text-accent' : 'text-ink-muted')}>
+                {label}
+              </span>
             </div>
-            <span className={`text-xs mt-1 font-medium ${i === current ? 'text-blue-600' : 'text-slate-400'}`}>
-              {label}
-            </span>
-          </div>
-          {i < STEPS.length - 1 && (
-            <div className={`w-12 h-0.5 mb-4 mx-1 transition-all ${i < current ? 'bg-blue-600' : 'bg-slate-200'}`} />
-          )}
-        </div>
-      ))}
-    </div>
+            {i < STEPS.length - 1 && (
+              <div className={cn('mx-2 mb-5 h-px w-10 transition-colors', done ? 'bg-accent' : 'bg-line')} />
+            )}
+          </li>
+        )
+      })}
+    </ol>
   )
 }
 
-// ===== Step 1：投資目標 =====
+// ── Step 1：目標與年限 ──
 
-function Step1Goal({
+function StepGoal({
   goal, timeHorizon, onChange,
 }: {
   goal: InvestGoal | null
   timeHorizon: TimeHorizon | null
-  onChange: (goal: InvestGoal, time: TimeHorizon) => void
+  onChange: (goal: InvestGoal | null, time: TimeHorizon | null) => void
 }) {
-  const [localGoal, setLocalGoal] = useState<InvestGoal | null>(goal)
-  const [localTime, setLocalTime] = useState<TimeHorizon | null>(timeHorizon)
-
   return (
     <div>
-      <h2 className="text-2xl font-bold text-slate-900 mb-1">你的投資目標是什麼？</h2>
-      <p className="text-slate-500 mb-6">選擇目標後，再設定你預計投資多久</p>
+      <h2 className="text-xl font-semibold">你的投資目標是什麼？</h2>
+      <p className="mt-1 text-sm text-ink-muted">選擇目標後，再設定預計投資多久。</p>
 
-      {/* 目標選擇 */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-8">
+      <div className="mt-5 grid gap-3 sm:grid-cols-2">
         {(Object.keys(GOAL_INFO) as InvestGoal[]).map((g) => {
           const info = GOAL_INFO[g]
+          const Icon = GOAL_ICONS[g]
+          const selected = goal === g
           return (
             <button
               key={g}
-              onClick={() => { setLocalGoal(g); if (localTime) onChange(g, localTime) }}
-              className={`text-left p-4 rounded-xl border-2 transition-all ${
-                localGoal === g
-                  ? 'border-blue-500 bg-blue-50'
-                  : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
-              }`}
+              type="button"
+              onClick={() => onChange(g, timeHorizon)}
+              aria-pressed={selected}
+              className={cn(
+                'flex items-start gap-3 rounded-xl border p-4 text-left transition-colors',
+                selected ? 'border-accent bg-accent-wash' : 'border-line hover:border-line-strong'
+              )}
             >
-              <div className="flex items-center gap-3">
-                <span className="text-3xl">{info.icon}</span>
-                <div>
-                  <p className="font-semibold text-slate-900">{info.label}</p>
-                  <p className="text-xs text-slate-500 mt-0.5">{info.hint}</p>
-                </div>
-              </div>
+              <span className={cn('rounded-lg p-2', selected ? 'bg-accent text-white' : 'bg-surface-sunken text-ink-secondary')}>
+                <Icon className="h-5 w-5" aria-hidden />
+              </span>
+              <span>
+                <span className="block font-medium">{info.label}</span>
+                <span className="mt-0.5 block text-xs text-ink-muted">{info.hint}</span>
+              </span>
             </button>
           )
         })}
       </div>
 
-      {/* 年限選擇 */}
-      <h3 className="font-semibold text-slate-900 mb-3">預計投資年限</h3>
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <h3 className="mt-8 text-sm font-semibold">預計投資年限</h3>
+      <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
         {(Object.keys(TIME_INFO) as TimeHorizon[]).map((t) => {
-          const info = TIME_INFO[t]
+          const selected = timeHorizon === t
           return (
             <button
               key={t}
-              onClick={() => { setLocalTime(t); if (localGoal) onChange(localGoal, t) }}
-              className={`py-3 rounded-xl border-2 text-center transition-all font-medium text-sm ${
-                localTime === t
-                  ? 'border-blue-500 bg-blue-50 text-blue-700'
-                  : 'border-slate-200 hover:border-slate-300 text-slate-700'
-              }`}
+              type="button"
+              onClick={() => onChange(goal, t)}
+              aria-pressed={selected}
+              className={cn(
+                'rounded-xl border py-3 text-center text-sm font-medium transition-colors',
+                selected ? 'border-accent bg-accent-wash text-accent' : 'border-line text-ink-secondary hover:border-line-strong'
+              )}
             >
-              {info.label}
+              {TIME_INFO[t].label}
             </button>
           )
         })}
@@ -122,7 +142,7 @@ function Step1Goal({
   )
 }
 
-// ===== Step 2：風險評估 =====
+// ── Step 2：風險評估 ──
 
 const RISK_QUESTIONS = [
   {
@@ -137,7 +157,7 @@ const RISK_QUESTIONS = [
     q: '這筆投資佔你總資產的比例大約是？',
     options: [
       { label: '超過 50%，這是主要積蓄', value: 0 },
-      { label: '約 20-50%，有其他存款', value: 1 },
+      { label: '約 20 ~ 50%，有其他存款', value: 1 },
       { label: '低於 20%，閒置資金', value: 2 },
     ],
   },
@@ -151,7 +171,7 @@ const RISK_QUESTIONS = [
   },
 ]
 
-function Step2Risk({
+function StepRisk({
   riskLevel, onChange,
 }: {
   riskLevel: RiskLevel | null
@@ -159,530 +179,445 @@ function Step2Risk({
 }) {
   const [answers, setAnswers] = useState<(number | null)[]>([null, null, null])
 
-  const handleAnswer = (qi: number, val: number) => {
+  const handleAnswer = (qi: number, value: number) => {
     const next = [...answers]
-    next[qi] = val
+    next[qi] = value
     setAnswers(next)
 
     if (next.every((a) => a !== null)) {
-      const total = next.reduce((s, a) => s + (a ?? 0), 0)
-      const level: RiskLevel = total <= 1 ? 'CONSERVATIVE' : total <= 3 ? 'BALANCED' : 'AGGRESSIVE'
-      onChange(level)
+      const total = next.reduce((sum, a) => sum + (a ?? 0), 0)
+      onChange(total <= 1 ? 'CONSERVATIVE' : total <= 3 ? 'BALANCED' : 'AGGRESSIVE')
     }
   }
 
+  const RiskIcon = riskLevel ? RISK_ICONS[riskLevel] : null
+
   return (
     <div>
-      <h2 className="text-2xl font-bold text-slate-900 mb-1">你的風險承受度</h2>
-      <p className="text-slate-500 mb-6">回答 3 個情境題，幫助我們了解你適合哪種配置</p>
+      <h2 className="text-xl font-semibold">你的風險承受度</h2>
+      <p className="mt-1 text-sm text-ink-muted">回答 3 個情境題，幫助判斷你適合哪種配置。</p>
 
-      <div className="space-y-6">
-        {RISK_QUESTIONS.map((q, qi) => (
-          <div key={qi} className="bg-slate-50 rounded-xl p-4">
-            <p className="font-semibold text-slate-900 mb-3">
-              Q{qi + 1}. {q.q}
-            </p>
-            <div className="space-y-2">
-              {q.options.map((opt) => (
+      <div className="mt-5 space-y-5">
+        {RISK_QUESTIONS.map((question, qi) => (
+          <fieldset key={qi} className="rounded-xl border border-line bg-surface-sunken p-4">
+            <legend className="px-1 text-sm font-medium">Q{qi + 1}. {question.q}</legend>
+            <div className="mt-2 space-y-2">
+              {question.options.map((opt) => (
                 <button
                   key={opt.value}
+                  type="button"
                   onClick={() => handleAnswer(qi, opt.value)}
-                  className={`w-full text-left px-4 py-2.5 rounded-lg border transition-all text-sm ${
+                  aria-pressed={answers[qi] === opt.value}
+                  className={cn(
+                    'w-full rounded-lg border px-4 py-2.5 text-left text-sm transition-colors',
                     answers[qi] === opt.value
-                      ? 'border-blue-500 bg-blue-50 text-blue-700 font-medium'
-                      : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
-                  }`}
+                      ? 'border-accent bg-accent-wash font-medium text-accent'
+                      : 'border-line bg-surface text-ink-secondary hover:border-line-strong'
+                  )}
                 >
                   {opt.label}
                 </button>
               ))}
             </div>
-          </div>
+          </fieldset>
         ))}
       </div>
 
-      {/* 結果顯示 */}
-      {riskLevel && (
-        <div className={`mt-6 p-4 rounded-xl border-2 border-blue-200 bg-blue-50`}>
-          <div className="flex items-center gap-2 mb-1">
-            <span className="text-2xl">{RISK_INFO[riskLevel].icon}</span>
-            <p className="font-bold text-blue-900">
-              你的風險類型：{RISK_INFO[riskLevel].label}派
-            </p>
+      {riskLevel && RiskIcon && (
+        <div className="mt-5 flex items-start gap-3 rounded-xl border border-accent/30 bg-accent-wash p-4">
+          <RiskIcon className="mt-0.5 h-5 w-5 shrink-0 text-accent" aria-hidden />
+          <div>
+            <p className="font-medium text-accent">你的風險類型：{RISK_INFO[riskLevel].label}</p>
+            <p className="mt-0.5 text-sm text-ink-secondary">{RISK_INFO[riskLevel].desc}</p>
           </div>
-          <p className="text-sm text-blue-700">{RISK_INFO[riskLevel].desc}</p>
         </div>
       )}
     </div>
   )
 }
 
-// ===== Step 3：資金規劃 =====
+// ── Step 3：資金規劃 ──
 
-function Step3Budget({
+const MONEY_INPUT_CLASS =
+  'w-full rounded-lg border border-line-strong bg-surface py-2.5 pl-7 pr-3 text-sm ' +
+  'placeholder:text-ink-muted focus:border-accent focus:outline-none'
+
+function StepBudget({
   monthly, savings, onChange,
 }: {
   monthly: number
   savings: number
   onChange: (monthly: number, savings: number) => void
 }) {
-  const [m, setM] = useState(monthly > 0 ? monthly.toString() : '')
-  const [s, setS] = useState(savings > 0 ? savings.toString() : '')
+  return (
+    <div>
+      <h2 className="text-xl font-semibold">資金規劃</h2>
+      <p className="mt-1 text-sm text-ink-muted">設定投資預算，用來估算未來的複利成長。</p>
 
-  const update = (newM: string, newS: string) => {
-    setM(newM); setS(newS)
-    onChange(parseFloat(newM) || 0, parseFloat(newS) || 0)
-  }
+      <div className="mt-5 space-y-5">
+        <label className="block">
+          <span className="mb-1.5 block text-sm font-medium">每月可投入金額</span>
+          <div className="relative">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted">$</span>
+            <input
+              type="number"
+              min="0"
+              value={monthly || ''}
+              onChange={(e) => onChange(parseFloat(e.target.value) || 0, savings)}
+              placeholder="例如 500"
+              className={MONEY_INPUT_CLASS}
+            />
+          </div>
+          <span className="mt-1 block text-xs text-ink-muted">建議至少 $100／月，複利效果才明顯。</span>
+        </label>
+
+        <label className="block">
+          <span className="mb-1.5 block text-sm font-medium">目前已有的投資資金</span>
+          <div className="relative">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted">$</span>
+            <input
+              type="number"
+              min="0"
+              value={savings || ''}
+              onChange={(e) => onChange(monthly, parseFloat(e.target.value) || 0)}
+              placeholder="若目前為零請填 0"
+              className={MONEY_INPUT_CLASS}
+            />
+          </div>
+        </label>
+      </div>
+    </div>
+  )
+}
+
+// ── Step 4：專屬方案 ──
+
+/** 推薦配置的迷你堆疊條 + 明細。配置固定 ≤7 檔，色票夠用不需折疊，但仍走同一套色系。 */
+function RecommendationAllocation({ title, items }: { title: string; items: AllocationItem[] }) {
+  const folded = foldToSlots(items, (i) => i.symbol, (i) => i.percentage)
 
   return (
     <div>
-      <h2 className="text-2xl font-bold text-slate-900 mb-1">資金規劃</h2>
-      <p className="text-slate-500 mb-6">設定你的投資預算，讓我們估算未來的成長潛力</p>
-
-      <div className="space-y-5">
-        <div>
-          <label className="block text-sm font-semibold text-slate-700 mb-2">
-            每月可投入金額（美元）
-          </label>
-          <div className="relative">
-            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold">$</span>
-            <input
-              type="number"
-              value={m}
-              onChange={(e) => update(e.target.value, s)}
-              placeholder="例如 500"
-              min="0"
-              className="w-full pl-8 pr-4 py-3 border border-slate-300 rounded-xl text-base focus:outline-none focus:ring-2 focus:ring-blue-400"
-            />
-          </div>
-          <p className="text-xs text-slate-400 mt-1">建議至少 $100/月，複利效果才明顯</p>
-        </div>
-
-        <div>
-          <label className="block text-sm font-semibold text-slate-700 mb-2">
-            目前已有的投資資金（美元）
-          </label>
-          <div className="relative">
-            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold">$</span>
-            <input
-              type="number"
-              value={s}
-              onChange={(e) => update(m, e.target.value)}
-              placeholder="若目前為零請填 0"
-              min="0"
-              className="w-full pl-8 pr-4 py-3 border border-slate-300 rounded-xl text-base focus:outline-none focus:ring-2 focus:ring-blue-400"
-            />
-          </div>
-        </div>
-
-        {/* 小提示 */}
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800">
-          <div className="flex items-start gap-2">
-            <Lightbulb className="w-4 h-4 shrink-0 mt-0.5" />
-            <div>
-              <p className="font-semibold mb-1">每月小錢的驚人複利</p>
-              <p>每月投入 $500，年化 8% 報酬，20 年後約 <strong>$294,000</strong>。</p>
-              <p className="mt-1">自己投入的本金只有 $120,000，其餘 $174,000 是複利創造的！</p>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ===== Step 4：推薦方案 =====
-
-function AllocationBar({ items, title }: { items: AllocationItem[]; title: string }) {
-  const colors = [
-    'bg-blue-500', 'bg-emerald-500', 'bg-amber-500', 'bg-purple-500',
-    'bg-rose-500', 'bg-cyan-500', 'bg-orange-500', 'bg-indigo-500',
-  ]
-  return (
-    <div className="mb-4">
-      <p className="text-sm font-semibold text-slate-600 mb-2">{title}</p>
-      {/* 比例條 */}
-      <div className="flex h-4 rounded-full overflow-hidden mb-3 gap-0.5">
-        {items.map((item, i) => (
+      <h4 className="text-sm font-semibold">{title}</h4>
+      <div className="mt-2 flex h-6 gap-0.5 overflow-hidden rounded-md">
+        {folded.map((slice) => (
           <div
-            key={item.symbol}
-            className={`${colors[i % colors.length]} transition-all`}
-            style={{ width: `${item.percentage}%` }}
-            title={`${item.symbol} ${item.percentage}%`}
+            key={slice.key}
+            title={`${slice.label} ${formatPercent(slice.value, 0)}`}
+            style={{ width: `${slice.value}%`, backgroundColor: slice.color }}
           />
         ))}
       </div>
-      {/* 明細 */}
-      <div className="space-y-1.5">
+      <ul className="mt-3 space-y-1.5">
         {items.map((item, i) => (
-          <div key={item.symbol} className="flex items-start gap-2">
-            <div className={`w-3 h-3 rounded-sm shrink-0 mt-0.5 ${colors[i % colors.length]}`} />
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between">
-                <span className="font-semibold text-sm text-slate-900">{item.symbol}</span>
-                <span className="text-sm font-bold text-slate-700">{item.percentage}%</span>
+          <li key={item.symbol} className="flex items-start gap-2 text-sm">
+            <span
+              className="mt-1 h-2.5 w-2.5 shrink-0 rounded-sm"
+              style={{ backgroundColor: `var(--series-${(i % 8) + 1})` }}
+              aria-hidden
+            />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-medium">{item.symbol}</span>
+                <span className="tabular text-ink-secondary">{formatPercent(item.percentage, 0)}</span>
               </div>
-              <p className="text-xs text-slate-500 truncate">{item.name} · {item.reason}</p>
+              <p className="truncate text-xs text-ink-muted">{item.name} · {item.reason}</p>
             </div>
-          </div>
+          </li>
         ))}
-      </div>
+      </ul>
     </div>
   )
 }
 
-function ProjectionCard({ label, amount }: { label: string; amount: number }) {
-  return (
-    <div className="bg-white border border-slate-200 rounded-xl p-3 text-center">
-      <p className="text-xs text-slate-500 mb-1">{label}</p>
-      <p className="text-lg font-black text-slate-900">
-        ${amount.toLocaleString('en-US', { maximumFractionDigits: 0 })}
-      </p>
-    </div>
-  )
-}
-
-function Step4Result({
-  rec,
-  profile,
-  onConfirm,
-  isCreating,
+function StepResult({
+  rec, onConfirm, isCreating,
 }: {
   rec: PortfolioRecommendation
-  profile: InvestorProfile
   onConfirm: () => void
   isCreating: boolean
 }) {
-  const etfPct = rec.etfCore.reduce((s, i) => s + i.percentage, 0)
-  const stockPct = rec.stockSatellite.reduce((s, i) => s + i.percentage, 0)
+  const etfPct = rec.etfCore.reduce((sum, i) => sum + i.percentage, 0)
+  const stockPct = rec.stockSatellite.reduce((sum, i) => sum + i.percentage, 0)
 
   return (
     <div className="space-y-5">
-      {/* 標題 */}
-      <div className="text-center pb-2">
-        <p className="text-xs text-blue-600 font-semibold uppercase tracking-wider mb-1">你的專屬投資方案</p>
-        <h2 className="text-3xl font-black text-slate-900">{rec.title}</h2>
-        <p className="text-slate-500 text-sm mt-1">{rec.description}</p>
-        <div className="flex items-center justify-center gap-3 mt-3">
-          <span className="text-xs bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full font-semibold">
-            ETF 核心 {etfPct}%
-          </span>
-          {stockPct > 0 && (
-            <span className="text-xs bg-blue-100 text-blue-700 px-3 py-1 rounded-full font-semibold">
-              個股衛星 {stockPct}%
-            </span>
-          )}
-          <span className="text-xs bg-slate-100 text-slate-600 px-3 py-1 rounded-full">
-            預期年化 {rec.expectedReturnMin}-{rec.expectedReturnMax}%
-          </span>
+      <div className="text-center">
+        <p className="text-xs font-semibold uppercase tracking-wider text-accent">你的專屬投資方案</p>
+        <h2 className="mt-1 text-2xl font-semibold">{rec.title}</h2>
+        <p className="mt-1 text-sm text-ink-muted">{rec.description}</p>
+        <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+          <Badge tone="accent">ETF 核心 {etfPct}%</Badge>
+          {stockPct > 0 && <Badge>個股衛星 {stockPct}%</Badge>}
+          <Badge>預期年化 {rec.expectedReturnMin}–{rec.expectedReturnMax}%</Badge>
         </div>
       </div>
 
-      {/* 配置明細 */}
-      <div className={cardClass}>
-        {rec.etfCore.length > 0 && (
-          <AllocationBar items={rec.etfCore} title="ETF 核心（自動化、免擇時）" />
-        )}
+      <Card className="p-5">
+        <RecommendationAllocation title="ETF 核心（定期定額、免擇時）" items={rec.etfCore} />
         {rec.stockSatellite.length > 0 && (
-          <>
-            <div className="border-t border-slate-100 my-4" />
-            <AllocationBar items={rec.stockSatellite} title="個股衛星（等買點機會）" />
-          </>
-        )}
-      </div>
-
-      {/* 買點策略 */}
-      <div className={cardClass}>
-        <div className="flex items-center gap-2 mb-3">
-          <Target className="w-5 h-5 text-blue-600" />
-          <h3 className="font-bold text-slate-900">買點策略</h3>
-        </div>
-        <div className="space-y-3">
-          <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
-            <p className="text-xs font-semibold text-emerald-700 mb-1">ETF 核心 — 無腦定期定額</p>
-            <p className="text-sm text-emerald-800">{rec.buyStrategy.etfRule}</p>
+          <div className="mt-5 border-t border-line pt-5">
+            <RecommendationAllocation title="個股衛星（等買點機會）" items={rec.stockSatellite} />
           </div>
+        )}
+      </Card>
+
+      <Card className="p-5">
+        <div className="flex items-center gap-2">
+          <Target className="h-4 w-4 text-accent" aria-hidden />
+          <h3 className="text-sm font-semibold">買點策略</h3>
+        </div>
+        <div className="mt-3 space-y-2 text-sm">
+          <p className="rounded-lg bg-surface-sunken px-3 py-2">
+            <span className="font-medium">ETF 核心：</span>
+            <span className="text-ink-secondary">{rec.buyStrategy.etfRule}</span>
+          </p>
           {rec.stockSatellite.length > 0 && (
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-              <p className="text-xs font-semibold text-blue-700 mb-1">個股衛星 — 等待觸發條件</p>
-              <p className="text-sm text-blue-800">{rec.buyStrategy.stockRule}</p>
-            </div>
+            <p className="rounded-lg bg-surface-sunken px-3 py-2">
+              <span className="font-medium">個股衛星：</span>
+              <span className="text-ink-secondary">{rec.buyStrategy.stockRule}</span>
+            </p>
           )}
           {rec.buyStrategy.triggers.length > 0 && (
-            <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
-              <p className="text-xs font-semibold text-slate-600 mb-2">個股買入觸發條件（滿足其中 2 條即可行動）</p>
-              <ul className="space-y-1">
-                {rec.buyStrategy.triggers.map((t, i) => (
-                  <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
-                    <span className="text-blue-500 font-bold shrink-0">✓</span> {t}
+            <div className="rounded-lg bg-surface-sunken px-3 py-2">
+              <p className="font-medium">個股買入觸發條件</p>
+              <ul className="mt-1.5 space-y-1">
+                {rec.buyStrategy.triggers.map((trigger, i) => (
+                  <li key={i} className="flex items-start gap-2 text-ink-secondary">
+                    <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent" aria-hidden />
+                    {trigger}
                   </li>
                 ))}
               </ul>
             </div>
           )}
         </div>
-      </div>
+      </Card>
 
-      {/* 資產預測 */}
-      <div className={cardClass}>
-        <div className="flex items-center gap-2 mb-3">
-          <TrendingUp className="w-5 h-5 text-emerald-600" />
-          <h3 className="font-bold text-slate-900">複利成長預測</h3>
-          <span className="text-xs text-slate-400 ml-auto">
-            每月 ${profile.monthlyContribution.toLocaleString()} + 現有 ${profile.currentSavings.toLocaleString()}
-          </span>
+      <Card className="p-5">
+        <div className="flex items-center gap-2">
+          <TrendingUp className="h-4 w-4 text-accent" aria-hidden />
+          <h3 className="text-sm font-semibold">複利成長預測</h3>
         </div>
-        <div className="grid grid-cols-3 gap-2">
-          <ProjectionCard label="5 年後" amount={rec.projections.year5} />
-          <ProjectionCard label="10 年後" amount={rec.projections.year10} />
-          <ProjectionCard label="20 年後" amount={rec.projections.year20} />
+        <div className="mt-4 grid grid-cols-3 gap-3">
+          <StatTile label="5 年後" value={formatCurrency(rec.projections.year5)} />
+          <StatTile label="10 年後" value={formatCurrency(rec.projections.year10)} />
+          <StatTile label="20 年後" value={formatCurrency(rec.projections.year20)} />
         </div>
-        <p className="text-xs text-slate-400 mt-2 text-center">
-          以年化 {rec.expectedReturnMin}-{rec.expectedReturnMax}% 中間值估算，實際結果因市場而異
+        <p className="mt-3 text-center text-xs text-ink-muted">
+          以年化 {rec.expectedReturnMin}–{rec.expectedReturnMax}% 中間值估算，實際結果因市場而異。
         </p>
-      </div>
+      </Card>
 
-      {/* 風險提示 */}
       {rec.warningNote && (
-        <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800">
-          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-          <p>{rec.warningNote}</p>
+        <div className="flex items-start gap-3 rounded-xl border border-warning/40 bg-warning/10 p-4 text-sm">
+          <Shield className="mt-0.5 h-4 w-4 shrink-0 text-ink-secondary" aria-hidden />
+          <p className="text-ink-secondary">{rec.warningNote}</p>
         </div>
       )}
 
-      {/* 建立按鈕 */}
-      <button
-        onClick={onConfirm}
-        disabled={isCreating}
-        className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white font-bold text-lg rounded-xl transition-all disabled:opacity-50 flex items-center justify-center gap-2"
-      >
-        {isCreating ? (
-          <>
-            <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-            建立中...
-          </>
-        ) : (
-          <>
-            <Wand2 className="w-5 h-5" />
-            建立「{rec.title}」投資組合
-          </>
-        )}
-      </button>
-      <p className="text-xs text-slate-400 text-center -mt-2">
-        建立後會自動加入觀察清單，方便追蹤買點
+      <Button className="w-full" size="lg" onClick={onConfirm} isLoading={isCreating}>
+        <Wand2 className="h-4 w-4" aria-hidden />
+        建立「{rec.title}」投資組合
+      </Button>
+      <p className="text-center text-xs text-ink-muted">
+        本建議僅供參考，不構成投資建議。請自行判斷並承擔投資風險。
       </p>
     </div>
   )
 }
 
-// ===== 主頁面 =====
+// ── 把推薦方案轉成實際持倉 ──
+
+const GOAL_TO_PORTFOLIO: Record<InvestGoal, Portfolio['investmentGoal']> = {
+  RETIREMENT: 'RETIREMENT',
+  HOME: 'HOME',
+  FREEDOM: 'SAVINGS',
+  EDUCATION: 'EDUCATION',
+  EMERGENCY: 'SAVINGS',
+}
+
+const HORIZON_TO_YEARS: Record<TimeHorizon, number> = {
+  SHORT: 2, MEDIUM: 4, LONG: 7, VERY_LONG: 15,
+}
+
+/**
+ * 把推薦的 ETF + 個股轉成持倉骨架（金額為 0，等使用者填入實際買入）。
+ * 原本這裡是 items: []，等於精心計算的配置完全沒被用上 ——
+ * 建出來的組合和隨手新建一個空組合毫無差別。
+ */
+function buildPortfolio(rec: PortfolioRecommendation, profile: InvestorProfile): Portfolio {
+  const items: PortfolioItem[] = [...rec.etfCore, ...rec.stockSatellite].map((item) => ({
+    id: `item_${crypto.randomUUID()}`,
+    stock: {
+      symbol: item.symbol,
+      name: item.name,
+      price: 0,
+      change: 0,
+      changePercent: 0,
+      lastUpdate: 0,
+      type: item.type,
+    },
+    allocationPercentage: item.percentage,
+    investedAmount: 0,
+    currentValue: 0,
+    unrealizedGain: 0,
+    unrealizedGainPercent: 0,
+    purchaseDate: Date.now(),
+    notes: item.reason,
+  }))
+
+  return {
+    id: `portfolio_${crypto.randomUUID()}`,
+    name: rec.title,
+    description: `${GOAL_INFO[profile.goal].label} · 每月投入 ${formatCurrency(profile.monthlyContribution)}`,
+    items,
+    targetAmount: rec.projections.year10,
+    totalInvested: 0,
+    totalValue: 0,
+    totalGain: 0,
+    totalGainPercent: 0,
+    investmentGoal: GOAL_TO_PORTFOLIO[profile.goal],
+    investmentYears: HORIZON_TO_YEARS[profile.timeHorizon],
+    createdDate: Date.now(),
+    lastModified: Date.now(),
+    isDefault: false,
+  }
+}
+
+// ── 主頁面 ──
 
 export function PortfolioBuilderPage() {
+  const savePortfolio = usePortfolioStore((s) => s.savePortfolio)
+  const setActivePortfolio = usePortfolioStore((s) => s.setActivePortfolio)
+
   const [step, setStep] = useState(0)
   const [done, setDone] = useState(false)
   const [isCreating, setIsCreating] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  // 用戶輸入
   const [goal, setGoal] = useState<InvestGoal | null>(null)
   const [timeHorizon, setTimeHorizon] = useState<TimeHorizon | null>(null)
   const [riskLevel, setRiskLevel] = useState<RiskLevel | null>(null)
   const [monthly, setMonthly] = useState(0)
   const [savings, setSavings] = useState(0)
 
-  const { savePortfolio } = usePortfolio()
-  const setActivePortfolio = usePortfolioStore((s) => s.setActivePortfolio)
-  const addWatchlistItem = useWatchlistStore((s) => s.addItem)
-
-  // 是否可以進入下一步
-  const canNext = [
-    goal !== null && timeHorizon !== null,
-    riskLevel !== null,
-    monthly > 0,
-  ][step] ?? true
-
   const profile: InvestorProfile | null =
     goal && timeHorizon && riskLevel
       ? { goal, timeHorizon, riskLevel, monthlyContribution: monthly, currentSavings: savings }
       : null
 
-  const rec = profile ? getRecommendation(profile) : null
+  // getRecommendation 是純函數，用 useMemo 避免每次 render 重算整組配置
+  const rec = useMemo(() => (profile ? getRecommendation(profile) : null), [profile])
+
+  const canAdvance = [
+    goal !== null && timeHorizon !== null,
+    riskLevel !== null,
+    monthly > 0,
+  ][step] ?? true
 
   const handleCreate = async () => {
     if (!rec || !profile) return
     setIsCreating(true)
+    setError(null)
 
     try {
-      const portfolioId = `portfolio_${Date.now()}`
-      const goalMap: Record<InvestGoal, Portfolio['investmentGoal']> = {
-        RETIREMENT: 'RETIREMENT', HOME: 'HOME', FREEDOM: 'SAVINGS',
-        EDUCATION: 'EDUCATION', EMERGENCY: 'SAVINGS',
-      }
-      const yearsMap: Record<TimeHorizon, number> = {
-        SHORT: 2, MEDIUM: 4, LONG: 7, VERY_LONG: 15,
-      }
-
-      const portfolio: Portfolio = {
-        id: portfolioId,
-        name: rec.title,
-        description: `${GOAL_INFO[profile.goal].label} · 每月投入 $${profile.monthlyContribution}`,
-        items: [],
-        targetAmount: rec.projections.year10,
-        totalInvested: profile.currentSavings,
-        totalValue: profile.currentSavings,
-        totalGain: 0,
-        totalGainPercent: 0,
-        investmentGoal: goalMap[profile.goal],
-        investmentYears: yearsMap[profile.timeHorizon],
-        createdDate: Date.now(),
-        lastModified: Date.now(),
-        isDefault: false,
-      }
-
+      const portfolio = buildPortfolio(rec, profile)
       await savePortfolio(portfolio)
-      setActivePortfolio(portfolioId)
-
-      // 把推薦個股加入觀察清單
-      for (const item of [...rec.etfCore, ...rec.stockSatellite]) {
-        const watchlistItem = {
-          id: `watchlist_${item.symbol}_${Date.now()}`,
-          symbol: item.symbol,
-          name: item.name,
-          type: item.type,
-          addedDate: Date.now(),
-          notes: `${rec.title} 推薦配置 ${item.percentage}%：${item.reason}`,
-        }
-        addWatchlistItem(watchlistItem)
-        await storageService.saveWatchlistItem(watchlistItem)
-      }
-
+      setActivePortfolio(portfolio.id)
       setDone(true)
     } catch (err) {
-      console.error('建立投資組合失敗:', err)
+      setError(err instanceof Error ? err.message : '建立投資組合失敗')
     } finally {
       setIsCreating(false)
     }
   }
 
-  // ===== 完成畫面 =====
-
   if (done && rec) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-slate-100 flex items-center justify-center px-4">
-        <div className="max-w-md w-full text-center">
-          <div className="text-6xl mb-4">🎉</div>
-          <h2 className="text-3xl font-black text-slate-900 mb-2">投資組合已建立！</h2>
-          <p className="text-slate-600 mb-6">
-            「{rec.title}」已建立完成，推薦的 {[...rec.etfCore, ...rec.stockSatellite].length} 支
-            ETF / 個股已加入觀察清單。
-          </p>
-          <div className="bg-white rounded-2xl shadow-lg p-5 mb-6 text-left">
-            <p className="font-semibold text-slate-900 mb-3">接下來做什麼？</p>
-            <div className="space-y-2 text-sm text-slate-600">
-              <div className="flex items-start gap-2">
-                <span className="text-blue-500 font-bold shrink-0">1.</span>
-                <p>前往「<strong>投資組合</strong>」頁面，開始記錄每次買入</p>
-              </div>
-              <div className="flex items-start gap-2">
-                <span className="text-blue-500 font-bold shrink-0">2.</span>
-                <p>前往「<strong>觀察清單</strong>」查看推薦的 ETF / 個股</p>
-              </div>
-              <div className="flex items-start gap-2">
-                <span className="text-blue-500 font-bold shrink-0">3.</span>
-                <p>使用「<strong>巴菲特選股</strong>」分析個股，等待觸發條件出現</p>
-              </div>
-              <div className="flex items-start gap-2">
-                <span className="text-blue-500 font-bold shrink-0">4.</span>
-                <p>ETF 核心：<strong>每月固定日</strong>定期定額，不需等買點</p>
-              </div>
-            </div>
-          </div>
-          <p className="text-xs text-slate-400">
-            ⚠️ 本建議僅供參考，不構成投資建議。請自行判斷並承擔投資風險。
-          </p>
+      <div className="mx-auto max-w-md px-4 py-16 text-center">
+        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-good/10">
+          <Check className="h-7 w-7 text-good" aria-hidden />
         </div>
+        <h2 className="mt-5 text-xl font-semibold">投資組合已建立</h2>
+        <p className="mt-2 text-sm text-ink-muted">
+          「{rec.title}」已建立完成，包含 {[...rec.etfCore, ...rec.stockSatellite].length} 檔標的的配置骨架。
+          到「投資組合」頁面即可開始記錄每次買入。
+        </p>
+        <Card className="mt-6 p-5 text-left">
+          <p className="text-sm font-medium">接下來</p>
+          <ul className="mt-2 space-y-2 text-sm text-ink-secondary">
+            <li className="flex gap-2"><Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden />到「投資組合」逐筆填入實際買入金額</li>
+            <li className="flex gap-2"><LineChart className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden />用「個股研究」分析個股，等待買點出現</li>
+            <li className="flex gap-2"><Landmark className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden />ETF 核心每月固定日定期定額，不需擇時</li>
+          </ul>
+        </Card>
       </div>
     )
   }
 
-  // ===== 精靈主畫面 =====
-
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-slate-100">
-      <header className="bg-white shadow-sm border-b border-slate-200">
-        <div className="max-w-2xl mx-auto px-4 py-5">
-          <div className="flex items-center gap-3">
-            <Wand2 className="w-7 h-7 text-blue-600" />
-            <div>
-              <h1 className="text-2xl font-bold text-slate-900">投資組合建立精靈</h1>
-              <p className="text-sm text-slate-500">4 步驟建立屬於你的專屬投資組合</p>
-            </div>
-          </div>
+    <div className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
+      <header className="mb-8 flex items-center gap-3">
+        <span className="rounded-lg bg-accent-wash p-2">
+          <Wand2 className="h-5 w-5 text-accent" aria-hidden />
+        </span>
+        <div>
+          <h1 className="text-lg font-semibold">投資組合建立精靈</h1>
+          <p className="text-sm text-ink-muted">四步驟建立屬於你的專屬配置</p>
         </div>
       </header>
 
-      <main className="max-w-2xl mx-auto px-4 py-8">
-        <StepBar current={step} />
+      <StepBar current={step} />
 
-        <div className={cardClass}>
-          {step === 0 && (
-            <Step1Goal
-              goal={goal}
-              timeHorizon={timeHorizon}
-              onChange={(g, t) => { setGoal(g); setTimeHorizon(t) }}
-            />
-          )}
-          {step === 1 && (
-            <Step2Risk
-              riskLevel={riskLevel}
-              onChange={setRiskLevel}
-            />
-          )}
-          {step === 2 && (
-            <Step3Budget
-              monthly={monthly}
-              savings={savings}
-              onChange={(m, s) => { setMonthly(m); setSavings(s) }}
-            />
-          )}
-          {step === 3 && rec && profile && (
-            <Step4Result
-              rec={rec}
-              profile={profile}
-              onConfirm={handleCreate}
-              isCreating={isCreating}
-            />
-          )}
+      <Card className="p-6">
+        {step === 0 && (
+          <StepGoal
+            goal={goal}
+            timeHorizon={timeHorizon}
+            onChange={(g, t) => { setGoal(g); setTimeHorizon(t) }}
+          />
+        )}
+        {step === 1 && <StepRisk riskLevel={riskLevel} onChange={setRiskLevel} />}
+        {step === 2 && (
+          <StepBudget
+            monthly={monthly}
+            savings={savings}
+            onChange={(m, s) => { setMonthly(m); setSavings(s) }}
+          />
+        )}
+        {step === 3 && rec && profile && (
+          <StepResult rec={rec} onConfirm={handleCreate} isCreating={isCreating} />
+        )}
 
-          {/* 導航按鈕（Step 4 由內部的建立按鈕控制） */}
-          {step < 3 && (
-            <div className={`flex ${step > 0 ? 'justify-between' : 'justify-end'} mt-8`}>
-              {step > 0 && (
-                <button
-                  onClick={() => setStep(step - 1)}
-                  className="flex items-center gap-1 px-4 py-2 text-slate-600 hover:text-slate-900 font-medium transition"
-                >
-                  <ChevronLeft className="w-4 h-4" /> 上一步
-                </button>
-              )}
-              <button
-                onClick={() => setStep(step + 1)}
-                disabled={!canNext}
-                className="flex items-center gap-1 px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl transition disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                {step === 2 ? '查看推薦方案' : '下一步'} <ChevronRight className="w-4 h-4" />
-              </button>
-            </div>
-          )}
-          {step === 3 && (
-            <button
-              onClick={() => setStep(step - 1)}
-              className="flex items-center gap-1 mt-4 px-4 py-2 text-slate-500 hover:text-slate-700 font-medium transition"
-            >
-              <ChevronLeft className="w-4 h-4" /> 修改設定
-            </button>
-          )}
+        {error && (
+          <p className="mt-4 rounded-lg border border-critical/30 bg-critical/5 px-3 py-2 text-sm text-critical">
+            {error}
+          </p>
+        )}
+      </Card>
+
+      {step < 3 && (
+        <div className="mt-5 flex justify-between">
+          <Button variant="ghost" onClick={() => setStep((s) => s - 1)} className={cn(step === 0 && 'invisible')}>
+            <ArrowLeft className="h-4 w-4" aria-hidden />
+            上一步
+          </Button>
+          <Button onClick={() => setStep((s) => s + 1)} disabled={!canAdvance}>
+            下一步
+            <ArrowRight className="h-4 w-4" aria-hidden />
+          </Button>
         </div>
-      </main>
+      )}
+
+      {step === 3 && (
+        <div className="mt-5">
+          <Button variant="ghost" onClick={() => setStep(2)}>
+            <ArrowLeft className="h-4 w-4" aria-hidden />
+            調整資金規劃
+          </Button>
+        </div>
+      )}
     </div>
   )
 }

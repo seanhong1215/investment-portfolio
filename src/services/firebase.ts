@@ -1,38 +1,23 @@
+/**
+ * Firebase SDK 初始化。
+ *
+ * 這個模組只會被 firestoreRepository 引用，而後者又只被 storage.ts
+ * 以動態 import 載入 —— 因此整包 Firebase SDK 會被 Vite 切成獨立 chunk，
+ * 只在使用者確實有設定雲端時才下載。
+ */
+
 import { initializeApp, getApps, type FirebaseApp } from 'firebase/app'
 import { getAuth, type Auth } from 'firebase/auth'
 import { getFirestore, type Firestore } from 'firebase/firestore'
-
-const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
-}
-
-/**
- * 判斷 Firebase 是否已在 .env 中配置
- * 需要 apiKey、authDomain、projectId 三個必要欄位
- */
-export const isFirebaseConfigured = Boolean(
-  firebaseConfig.apiKey?.trim() &&
-  firebaseConfig.authDomain?.trim() &&
-  firebaseConfig.projectId?.trim()
-)
+import { firebaseConfig } from './firebaseConfig'
 
 let app: FirebaseApp | null = null
 let auth: Auth | null = null
 let db: Firestore | null = null
 
-if (isFirebaseConfigured) {
-  app = getApps().length > 0 ? getApps()[0] : initializeApp(firebaseConfig)
-  auth = getAuth(app)
-  db = getFirestore(app)
-  console.log('🔥 Firebase 已初始化，專案:', firebaseConfig.projectId)
-} else {
-  console.log('💾 Firebase 未配置，使用本地 IndexedDB 存儲')
-}
+app = getApps().length > 0 ? getApps()[0] : initializeApp(firebaseConfig)
+auth = getAuth(app)
+db = getFirestore(app)
 
 export { auth, db }
 export default app

@@ -1,94 +1,86 @@
-import { useState, useEffect } from 'react'
-import { usePortfolio } from '@/hooks/usePortfolio'
-import Navigation, { Page } from '@/components/Navigation'
+import { useEffect, useState } from 'react'
+import { AlertTriangle, X } from 'lucide-react'
+import Navigation, { type Page } from '@/components/Navigation'
+import { Button } from '@/components/ui'
+import { usePortfolioStore } from '@/stores/portfolioStore'
 import { useStorageStatusStore } from '@/stores/storageStatusStore'
 import HomePage from '@/pages/HomePage'
-import WatchlistPage from '@/pages/WatchlistPage'
-import GoalsPage from '@/pages/GoalsPage'
 import BuffettPage from '@/pages/BuffettPage'
 import PortfolioBuilderPage from '@/pages/PortfolioBuilderPage'
-import './App.css'
 
-/** 將 Firebase 錯誤碼對應到中文說明 */
-function getFirebaseErrorHint(errorMsg: string): string {
-  if (errorMsg.includes('auth/configuration-not-found'))
-    return '請至 Firebase Console → Authentication → Sign-in method，啟用「匿名」登入方式'
-  if (errorMsg.includes('auth/network-request-failed'))
-    return '網路連線失敗，請確認網路狀態或稍後再試'
-  if (errorMsg.includes('permission-denied'))
-    return '請確認 Firestore 安全規則已正確設定'
-  return errorMsg
+/** 把 Firebase 的錯誤碼翻成使用者能實際採取行動的說明 */
+function describeStorageError(message: string): string {
+  if (message.includes('auth/configuration-not-found'))
+    return '請至 Firebase Console → Authentication → Sign-in method，啟用「匿名」登入。'
+  if (message.includes('auth/network-request-failed'))
+    return '網路連線失敗，請確認網路狀態後重新整理。'
+  if (message.includes('permission-denied'))
+    return '請確認 Firestore 安全規則已允許使用者存取自己的資料。'
+  return message
+}
+
+/** 雲端不可用時的提示。應用仍可正常使用，所以是橫幅而不是擋住畫面的錯誤頁。 */
+function StorageWarningBanner() {
+  const error = useStorageStatusStore((s) => s.error)
+  const [dismissed, setDismissed] = useState(false)
+
+  if (!error || dismissed) return null
+
+  return (
+    <div className="border-b border-line bg-warning/10">
+      <div className="mx-auto flex max-w-7xl items-start gap-3 px-4 py-2.5 sm:px-6 lg:px-8">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-ink-secondary" aria-hidden />
+        <p className="flex-1 text-sm text-ink-secondary">
+          <span className="font-medium text-ink">雲端同步無法使用，資料改存在此裝置。</span>{' '}
+          {describeStorageError(error)}
+        </p>
+        <button
+          onClick={() => setDismissed(true)}
+          aria-label="關閉提示"
+          className="shrink-0 rounded p-0.5 text-ink-muted hover:text-ink"
+        >
+          <X className="h-4 w-4" aria-hidden />
+        </button>
+      </div>
+    </div>
+  )
 }
 
 function App() {
   const [currentPage, setCurrentPage] = useState<Page>('portfolios')
-  const [dismissedError, setDismissedError] = useState(false)
-  const { isLoading, error } = usePortfolio()
-  const { error: storageError } = useStorageStatusStore()
+  const isLoading = usePortfolioStore((s) => s.isLoading)
+  const error = usePortfolioStore((s) => s.error)
+  const loadPortfolios = usePortfolioStore((s) => s.loadPortfolios)
 
+  // 整個應用只在這裡載入一次。原本 App 與 HomePage 各自呼叫 usePortfolio()，
+  // 導致開場打了兩次資料庫。
   useEffect(() => {
-    console.log('🚀 應用已啟動')
-  }, [])
-
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-screen bg-slate-50">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4" />
-          <p className="text-slate-600">載入中...</p>
-        </div>
-      </div>
-    )
-  }
+    void loadPortfolios()
+  }, [loadPortfolios])
 
   if (error) {
     return (
-      <div className="flex items-center justify-center h-screen bg-slate-50">
-        <div className="text-center p-8 bg-white rounded-xl shadow-lg max-w-md border border-slate-200">
-          <div className="text-4xl mb-4">⚠️</div>
-          <h2 className="text-xl font-bold text-slate-900 mb-2">出錯了</h2>
-          <p className="text-slate-600 mb-4">{error}</p>
-          <button
-            onClick={() => window.location.reload()}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-medium"
-          >
+      <div className="flex min-h-screen items-center justify-center bg-page px-4">
+        <div className="max-w-md rounded-xl border border-line bg-surface p-8 text-center">
+          <AlertTriangle className="mx-auto h-8 w-8 text-critical" aria-hidden />
+          <h1 className="mt-4 text-lg font-semibold">無法載入投資組合</h1>
+          <p className="mt-2 text-sm text-ink-muted">{error}</p>
+          <Button className="mt-6" onClick={() => window.location.reload()}>
             重新載入
-          </button>
+          </Button>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-page">
       <Navigation currentPage={currentPage} onPageChange={setCurrentPage} />
+      <StorageWarningBanner />
 
-      {/* Firebase 錯誤提示橫幅 */}
-      {storageError && !dismissedError && (
-        <div className="bg-amber-50 border-b border-amber-200 px-4 py-3">
-          <div className="max-w-7xl mx-auto flex items-start justify-between gap-4">
-            <div className="text-sm text-amber-800">
-              <span className="font-semibold">⚠️ 雲端同步連線失敗，目前使用本地存儲。</span>
-              <span className="ml-2 text-amber-700">
-                {getFirebaseErrorHint(storageError)}
-              </span>
-            </div>
-            <button
-              onClick={() => setDismissedError(true)}
-              className="text-amber-500 hover:text-amber-700 text-lg leading-none shrink-0"
-              aria-label="關閉"
-            >
-              ×
-            </button>
-          </div>
-        </div>
-      )}
-
-      {currentPage === 'builder'    && <PortfolioBuilderPage />}
-      {currentPage === 'portfolios' && <HomePage />}
-      {currentPage === 'watchlist'  && <WatchlistPage />}
-      {currentPage === 'goals'      && <GoalsPage />}
-      {currentPage === 'buffett'    && <BuffettPage />}
+      {currentPage === 'builder' && <PortfolioBuilderPage />}
+      {currentPage === 'portfolios' && <HomePage isLoading={isLoading} />}
+      {currentPage === 'research' && <BuffettPage />}
     </div>
   )
 }
