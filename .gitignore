@@ -5,6 +5,9 @@ node_modules/
 dist/
 dist-ssr/
 
+# Test coverage
+coverage/
+
 # Environment variables (contains API keys)
 .env
 .env.local
