@@ -1,323 +1,144 @@
-# 投資組合顧問 - Investment Portfolio Advisor
+# 投資組合分析 · Portfolio Analytics
 
-為上班族設計的智能投資推薦和管理工具
+以核心衛星策略為主軸的投資組合分析工具。使用者可依目標與風險偏好產生個人化配置，
+追蹤各組合的損益與資產分佈，並用價值投資的指標分析個股是否值得買進、何時是合理買點。
 
-## 🎯 功能概述
+> React 19 · TypeScript · Vite · Zustand · Tailwind 4 · Vitest
+> 純前端（本地優先，可選 Firebase 雲端同步）· 深淺色雙主題 · 109 個單元測試
 
-這個項目幫助上班族建立和管理投資組合，具有以下主要功能：
+---
 
-### 核心功能（已實現）
-- ✅ **投資組合管理**：創建、編輯、刪除和查看投資組合
-- ✅ **推薦配置系統**：5 種預設配置（保守、平衡、積極、股息、科技）
-- ✅ **平衡配置**：ETF 70% + 個股 30% 的默認配置
-- ✅ **本地存儲**：使用 IndexedDB 實現本地數據持久化
-- ✅ **狀態管理**：Zustand 全局狀態管理
-- ✅ **反應式 UI**：實時更新和計算
+## 這份作品想展示什麼
 
-### 開發中/計劃功能
-- 🔄 **API 集成**：Alpha Vantage API 獲取實時股票數據
-- 📊 **定期定額投資**：設置每月自動投資計劃
-- 🔔 **加碼提醒系統**：市場下跌時自動/手動提醒加碼
-- 📈 **績效追蹤**：詳細的投資收益率計算
-- ☁️ **雲端同步**：未來集成 Firebase 實現多設備同步
-- 💡 **智能建議**：基於市場數據的投資建議
+這不是一個「功能很多」的專案，而是刻意把**取捨與工程判斷**做清楚：
 
-## 🏗️ 項目結構
+1. **領域邏輯與 UI 徹底分離。** 所有財務計算（損益、配置佔比、核心衛星比重、巴菲特評分、
+   合理估價、複利試算）都是 `src/domain/` 底下的純函數，不 import React、不碰 I/O，因此
+   **能被完整測試**。這也讓同一個指標在不同頁面永遠算出相同結果。
+
+2. **測試證明它有用，不是為了覆蓋率數字。** 重構過程中，`presets.test.ts` 的
+   「配置比例總和必須是 100%」直接抓到一個潛伏的資料錯誤 —— 原本的「積極配置」加總是
+   **104%**，會讓使用者被要求投入超過本金的錢，而且當時整個專案沒有任何測試擋得下來。
+
+3. **設計系統以可驗證的方式建立。** 圖表配色不是憑感覺挑的，而是用色盲安全性驗證腳本
+   跑過、對淺色（`#ffffff`）與深色（`#16181d`）兩個實際表面色各自通過六項檢查後才採用。
+   詳見〈設計系統〉。
+
+---
+
+## 架構
 
 ```
-investment-portfolio-advisor/
-├── src/
-│   ├── components/          # React 組件（保留用於未來擴展）
-│   ├── hooks/              # 自定義 React Hooks
-│   │   └── usePortfolio.ts # 投資組合管理 Hook
-│   ├── pages/              # 頁面組件
-│   │   └── HomePage.tsx    # 首頁
-│   ├── services/           # 業務邏輯服務
-│   │   ├── firebase.ts     # Firebase 配置
-│   │   ├── stockAPI.ts     # 股票 API 服務 + 緩存
-│   │   ├── storage.ts      # IndexedDB 存儲層
-│   │   └── recommendedConfigs.ts  # 推薦配置
-│   ├── stores/             # Zustand 狀態存儲
-│   │   └── portfolioStore.ts
-│   ├── types/              # TypeScript 類型定義
-│   │   └── index.ts
-│   ├── App.tsx             # 根組件
-│   ├── App.css             # 應用樣式
-│   ├── index.css           # 全局樣式 + Tailwind
-│   └── main.tsx            # 應用入口
-├── index.html              # HTML 入口
-├── vite.config.ts          # Vite 配置
-├── tsconfig.json           # TypeScript 配置
-├── tailwind.config.ts      # Tailwind CSS 配置
-├── postcss.config.js       # PostCSS 配置
-├── package.json            # 項目依賴
-├── .env                    # 環境變量（本地開發）
-└── .env.example            # 環境變量示例
+src/
+├── domain/          純函數領域層 —— 不依賴 React、不碰 I/O，100% 單元測試覆蓋
+│   ├── portfolioMetrics.ts   損益、配置佔比、核心衛星比重、再平衡偏離、目標進度
+│   ├── buffett.ts            巴菲特選股評分、合理估價（葛拉漢／PEG／保守 P/E）、買點訊號
+│   ├── advisor.ts            依「風險 × 年限」12 種組合產生配置與複利試算
+│   └── presets.ts            五種預設配置模板
+│
+├── services/        I/O 層 —— 邊界都以介面隔開
+│   ├── portfolioRepository.ts   儲存介面（兩個實作都必須符合，編譯期把關）
+│   ├── indexedDbRepository.ts   本地實作（離線可用，也是雲端失敗時的退路）
+│   ├── firestoreRepository.ts   雲端實作（動態載入，見〈效能〉）
+│   ├── storage.ts               後端選擇與退回策略
+│   └── stockAPI.ts              Alpha Vantage 報價 + 快取
+│
+├── stores/          Zustand 全域狀態（非同步動作收在 store 內，狀態只有一份）
+├── components/
+│   ├── ui/          原子元件（Button／Card／StatTile／Badge…，用 CVA 管理變體）
+│   └── charts/      資料視覺化（配置堆疊條 + 色票指派規則）
+└── pages/           三大頁面：建立組合 / 投資組合 / 個股研究
 ```
 
-## 🚀 快速開始
+**分層的理由**：`domain/` 與 `services/` 的界線讓「算得對不對」與「存在哪裡」互不干擾。
+要換掉儲存後端，只需新增一個 `PortfolioRepository` 的實作；要改評分規則，只動 `domain/`，
+且改完 `npm test` 立刻告訴你有沒有破壞既有行為。
 
-### 環境要求
-- Node.js 18+
-- npm 7+
+---
 
-### 安裝依賴
+## 幾個具體的工程決策
+
+**儲存後端用明確介面隔開。** 原本 IndexedDB 與 Firestore 兩個實作只是「碰巧」有同名方法，
+沒有型別關係 —— 任一邊改了簽章，TypeScript 不會出聲。現在兩者都 `implements PortfolioRepository`，
+不一致會在編譯期就擋下來。雲端不可用時**自動退回本地**而非讓畫面壞掉，因為這個應用沒有雲端
+也完全能用。
+
+**總額一律由持倉推導，不做增量加減。** 新增／移除持倉時若手動「總額 ± 這筆金額」，只要有一條
+路徑漏算，誤差就永久寫進資料。改成每次都用 `calcPortfolioTotals(items)` 重算後，總額不可能與
+持倉不一致。
+
+**除以零是被測試守住的邊界，不是防禦性程式碼。** 剛建立、尚未下單的組合投入金額為 0，直接算
+報酬率會得到 `NaN%` 並渲染到畫面上。`gainPercent()` 對這個情況回傳 0，且有對應測試。
+
+---
+
+## 設計系統
+
+顏色是**最後**才決定的，而且用腳本驗證、不靠肉眼判斷。
+
+- **單一 token 來源。** 所有顏色定義在 `index.css` 的 CSS 變數，透過 Tailwind 4 的
+  `@theme inline` 讓 utility 直接引用變數 —— 淺／深色只要換一處變數，元件層一個 `dark:`
+  前綴都不用寫。
+- **類別色票依固定順序指派，永不循環。** 順序本身就是色盲安全機制（相鄰色差最大化）。
+  超過 8 個標的的部分折成「其他」（中性灰），而不是生成第 9 個難以辨識的色相。
+- **顏色跟著標的走，不跟著排名走。** 篩選掉某個標的時其餘不會換色 ——「VOO 是藍色」這個
+  認知不會失效。
+- **不只靠顏色表意。** 漲跌同時用箭頭方向與顏色兩個通道編碼；配置圖附**表格對照版**
+  （淺色模式下有三個色票對比低於 3:1，這是那條不靠顏色也讀得到值的路徑）。
+- **part-to-whole 用水平堆疊條而非圓餅圖。** 投資組合常有 8~9 檔持股，圓餅在超過 6 段或
+  數值相近時就讀不出來。
+
+配色以 `#ffffff`（淺）與 `#16181d`（深）兩個表面色各自通過色盲分離度、對比、色度等
+六項檢查後才採用。
+
+---
+
+## 效能
+
+**Firebase SDK 動態載入。** 主要問題是 `storage.ts` 靜態 import Firestore 實作，會把整包
+Firebase SDK（約 450KB）打進主 bundle，即使使用者沒設定雲端。把環境判斷（`firebaseConfig.ts`，
+不 import firebase）與 SDK 初始化拆開後，Firestore 改用動態 `import()`，Vite 自動切成獨立 chunk：
+
+| | 主 bundle (gzip) |
+|---|---|
+| 拆分前 | 199 KB（含 Firebase） |
+| 拆分後 | **93 KB**（Firebase 452KB 切為獨立 chunk，只在有設定雲端時載入） |
+
+---
+
+## 開始使用
 
 ```bash
-cd project/investment-portfolio-advisor
 npm install
+npm run dev          # 開發（http://localhost:3000）
+npm test             # 執行 109 個單元測試
+npm run test:coverage # 領域層覆蓋率（門檻：lines/functions 90%、branches 85%）
+npm run build        # 型別檢查 + 生產建置
 ```
 
-### 開發模式
+### 選用設定
 
-```bash
-npm run dev
-```
+**Firebase 雲端同步**（不設定則使用本地 IndexedDB）：複製 `.env.example` 為 `.env`，
+填入 Firebase 專案的 `VITE_FIREBASE_*` 值。Firestore 安全規則見 `firestoreRepository.ts` 檔頭。
 
-應用將在 `http://localhost:3000` 啟動
+**Alpha Vantage 即時報價**（個股研究的「API 自動查詢」模式）：於 `.env` 設定
+`VITE_ALPHA_VANTAGE_API_KEY`。免費版每日 25 次；額度用完時可切換到「手動輸入」模式，
+從 Yahoo Finance 等免費來源自行填入指標，功能完全一致。
 
-### 生產構建
+---
 
-```bash
-npm run build
-```
+## 測試策略
 
-### 類型檢查
+只對 `domain/` 設覆蓋率門檻，因為那裡是財務計算，算錯會直接影響使用者的錢；為了衝高整體
+數字去測 UI 樣式沒有意義。測試用 `testFactories.ts` 提供合理預設值，讓每條測試只需覆寫它
+真正在意的欄位。
 
-```bash
-npm run type-check
-```
+涵蓋範圍包括：`advisor.ts` 全部 12 種「風險 × 年限」組合的配置正確性、巴菲特六項指標的
+權重與邊界（虧損企業、P/E 為 0）、合理估價三種公式的數值正確性（對照獨立計算），以及
+所有「除以零／空組合／超額達成」的邊界狀況。
 
-## ⚙️ 配置說明
+---
 
-### Firebase 配置（可選）
+## 授權
 
-未來若要啟用雲端同步：
-
-1. 到 [Firebase Console](https://console.firebase.google.com) 創建項目
-2. 複製 `.env.example` 為 `.env`
-3. 填入 Firebase 配置值
-4. 解除 `src/services/firebase.ts` 中的相關代碼
-
-### Alpha Vantage API（可選）
-
-若要使用實時股票數據：
-
-1. 到 [Alpha Vantage](https://www.alphavantage.co) 獲取免費 API 密鑰
-2. 在 `.env` 中設置 `VITE_ALPHA_VANTAGE_API_KEY`
-
-**注意**：免費方案限制為每分鐘 5 個請求，每天 500 個請求，已實現緩存機制
-
-## 📚 核心概念解析
-
-### 架構設計
-
-```
-UI Components
-    ↓
-Custom Hooks（業務邏輯）
-    ↓
-Zustand Store（全局狀態）
-    ↓
-Service Layer（業務服務）
-    ├─ stockAPI.ts（API + 緩存）
-    ├─ storage.ts（數據持久化）
-    └─ recommendedConfigs.ts（配置）
-    ↓
-數據層
-├─ IndexedDB（本地存儲）
-├─ Firebase（未來雲端）
-└─ Alpha Vantage（股票數據）
-```
-
-### 分層存儲設計
-
-目前使用 IndexedDB（本地），未來可無縫遷移到 Firebase：
-
-```typescript
-// 現在：使用 IndexedDB
-const storageService = new StorageService()
-await storageService.savePortfolio(portfolio)
-
-// 未來：可替換為 Firebase 實現，上層代碼無需改動
-// class FirebaseStorageService implements IStorageService { ... }
-```
-
-### 狀態管理流程
-
-1. **組件** 使用 `usePortfolio()` Hook
-2. **Hook** 從 Zustand Store 讀取狀態
-3. **Store** 更新全局狀態
-4. **Service** 執行業務邏輯（API 調用、存儲）
-5. **數據層** 持久化到 IndexedDB/Firebase
-
-## 📖 主要類型說明
-
-### Portfolio（投資組合）
-```typescript
-{
-  id: string              // 唯一標識
-  name: string            // 組合名稱
-  items: PortfolioItem[]  // 持倉列表
-  targetAmount: number    // 目標金額
-  totalValue: number      // 當前市值
-  investmentGoal: string  // 投資目標（退休/買房等）
-}
-```
-
-### Stock（股票）
-```typescript
-{
-  symbol: string          // 股票代碼（AAPL、VOO）
-  price: number           // 當前價格
-  changePercent: number   // 漲跌幅
-  type: 'ETF' | 'STOCK'  // 類型
-  lastUpdate: number      // 最後更新時間
-}
-```
-
-### 推薦配置
-
-提供 5 種預設配置，包含股票和 ETF 的建議配置比例：
-- 🛡️ **保守派**：債券 30%，ETF 70%
-- ⚖️ **平衡派**：個股 30%，ETF 70%（推薦）
-- 🚀 **積極派**：成長/科技股 50%，ETF 50%
-- 💰 **股息派**：高股息股票和 ETF
-- 💻 **科技派**：科技和創新股票
-
-## 🛠️ 開發指南
-
-### 添加新功能
-
-1. 在適當的 `service` 中添加業務邏輯
-2. 在 `Hook` 中暴露 API
-3. 在 `components` 中使用 Hook
-4. 類型定義更新到 `types/index.ts`
-
-### 添加新頁面
-
-1. 在 `pages/` 創建新組件
-2. 從 `App.tsx` 導入和使用
-3. 使用 `usePortfolio()` 或其他 Hook 管理狀態
-
-### 調試
-
-開發模式下，右下角會顯示調試信息：
-- 📊 投資組合數量
-- 🎯 當前活躍投資組合
-
-在瀏覽器控制台檢查日誌：
-```javascript
-// 檢查 API 緩存
-console.log(stockAPIService.getCacheStats())
-
-// 清除緩存
-stockAPIService.clearCache()
-
-// 導出數據
-const data = await storageService.exportData()
-```
-
-## 🎨 樣式系統
-
-使用 **Tailwind CSS 4** + **自訂組件類**：
-
-```html
-<!-- 自訂組件類（定義在 index.css） -->
-<div class="card">卡片內容</div>
-<button class="btn-primary">主要按鈕</button>
-<button class="btn-secondary">次要按鈕</button>
-
-<!-- 投資相關顏色 -->
-<span class="text-bull">上漲（綠色）</span>
-<span class="text-bear">下跌（紅色）</span>
-```
-
-## 📋 注释規範
-
-所有代碼包含詳細的中文注釋：
-
-- **文件頭部**：解釋文件用途
-- **函數/類**：説明參數和返回值
-- **複雜邏輯**：分步驟注釋
-- **為什麼**：注釋解釋設計決策
-
-## 📊 未來擴展方向
-
-### 第一階段（當前）
-- 基本的投資組合管理
-- 本地數據存儲
-- 推薦配置系統
-
-### 第二階段
-- Firebase 集成（雲端同步）
-- 實時股票數據（Alpha Vantage）
-- 加碼提醒系統
-
-### 第三階段
-- 自動化投資執行（對接券商 API）
-- AI 投資建議
-- 稅務優化建議
-- 社區分享功能
-
-## 🔐 安全性說明
-
-- 所有 API 密鑰存儲在 `.env`（不提交到 Git）
-- `vite.env.d.ts` 確保類型安全
-- 敏感操作需要二次確認
-- 無本地存儲密鑰，交由 Firebase 管理
-
-## 📞 問題排除
-
-### 開發服務器無法啟動
-
-```bash
-# 檢查 Node.js 版本
-node --version
-
-# 清除 node_modules 並重新安裝
-rm -rf node_modules package-lock.json
-npm install
-
-# 清除 Vite 緩存
-rm -rf .vite
-
-# 重新啟動
-npm run dev
-```
-
-### 類型錯誤
-
-```bash
-# 檢查類型
-npm run type-check
-
-# 查看 tsconfig.json 確保路徑別名正確
-```
-
-### IndexedDB 問題
-
-```javascript
-// 清除所有數據
-await storageService.clearAll()
-
-// 重新加載頁面
-window.location.reload()
-```
-
-## 📄 許可證
-
-MIT License
-
-## 👨‍💻 開發者註記
-
-這個項目展示了現代 React 應用開發的最佳實踐：
-
-- ✅ TypeScript 完整類型支持
-- ✅ 分層架構設計（易於維護和擴展）
-- ✅ 自定義 Hooks 重用邏輯
-- ✅ 小型狀態管理庫（Zustand）
-- ✅ IndexedDB 本地持久化
-- ✅ 詳細的中文註釋解釋代碼
-
-享受編碼！🚀
+MIT

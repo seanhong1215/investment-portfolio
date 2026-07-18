@@ -1,73 +1,226 @@
 /**
- * 全局 CSS 樣式
+ * 設計 Token 層 — 整個應用唯一的顏色來源
  *
- * 這個文件包含項目的全局樣式
- * Tailwind CSS 4 的核心指令也在這裡導入
+ * 為什麼用 `@theme inline` 而不是 Tailwind 的 `dark:` 前綴：
+ * `inline` 讓 utility class 直接展開成 var(--x) 而非把值複製一份，
+ * 因此淺／深色只要在 :root 換掉變數，所有元件自動跟著換，
+ * 元件層一個 `dark:` 都不用寫（少一半 class、也不會漏掉某個角落）。
+ *
+ * 色票來源：dataviz 設計系統參考配色，已用 validator 對本專案的實際
+ * 表面色驗證過（淺色 #ffffff / 深色 #16181d），兩個模式六項檢查全過。
+ * 修改任何 --series-* 或表面色後必須重跑驗證，不可憑肉眼判斷。
  */
 
-/* 導入 Tailwind CSS 4 的所有樣式 */
 @import "tailwindcss";
 
-/**
- * 全局基礎樣式
- */
+/* 讓主題切換鈕的 [data-theme] 標記優先於作業系統設定 */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+@theme inline {
+  /* 表面與墨色 */
+  --color-page: var(--page);
+  --color-surface: var(--surface);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-ink: var(--ink);
+  --color-ink-secondary: var(--ink-secondary);
+  --color-ink-muted: var(--ink-muted);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+
+  /* 品牌強調色 */
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-wash: var(--accent-wash);
+
+  /* 類別型色票 — 固定順序，永不循環重用。
+     順序本身就是 CVD 安全機制（相鄰色票的色差最大化），不可任意調換。 */
+  --color-series-1: var(--series-1);
+  --color-series-2: var(--series-2);
+  --color-series-3: var(--series-3);
+  --color-series-4: var(--series-4);
+  --color-series-5: var(--series-5);
+  --color-series-6: var(--series-6);
+  --color-series-7: var(--series-7);
+  --color-series-8: var(--series-8);
+
+  /* 狀態色 — 保留給狀態語意，永遠不可拿來當第 9 個系列色。
+     一律搭配 icon + 文字，不靠顏色單獨表意。 */
+  --color-good: var(--good);
+  --color-warning: var(--warning);
+  --color-serious: var(--serious);
+  --color-critical: var(--critical);
+
+  /* 漲跌 — 與狀態色分開，因為漲跌是方向不是健康度 */
+  --color-bull: var(--bull);
+  --color-bear: var(--bear);
+
+  --font-sans: system-ui, -apple-system, "Segoe UI", "Noto Sans TC", sans-serif;
+}
+
+/* ===== 淺色（預設） ===== */
+:root {
+  color-scheme: light;
+
+  --page: #f7f8fa;
+  --surface: #ffffff;
+  --surface-sunken: #f1f3f6;
+  --ink: #0b0d12;
+  --ink-secondary: #4a5160;
+  --ink-muted: #767e8f;
+  --line: #e6e9ee;
+  --line-strong: #cfd4dd;
+
+  --accent: #2a78d6;
+  --accent-hover: #256abf;
+  --accent-wash: #eef4fd;
+
+  --series-1: #2a78d6;
+  --series-2: #008300;
+  --series-3: #e87ba4;
+  --series-4: #eda100;
+  --series-5: #1baf7a;
+  --series-6: #eb6834;
+  --series-7: #4a3aa7;
+  --series-8: #e34948;
+
+  --good: #0ca30c;
+  --warning: #fab219;
+  --serious: #ec835a;
+  --critical: #d03b3b;
+
+  /* 淺色下用較深的綠當漲色，確保文字對比達標 */
+  --bull: #006300;
+  --bear: #d03b3b;
+}
+
+/* ===== 深色 =====
+   深色不是把淺色反轉，而是同樣八個色相針對深色表面重新取階，
+   並以深色表面重新跑過 validator（全部 ≥3:1）。 */
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+
+    --page: #0e1013;
+    --surface: #16181d;
+    --surface-sunken: #1c1f26;
+    --ink: #f5f6f8;
+    --ink-secondary: #a8b0bf;
+    --ink-muted: #767e8f;
+    --line: #262a33;
+    --line-strong: #363b47;
+
+    --accent: #3987e5;
+    --accent-hover: #5598e7;
+    --accent-wash: #16233a;
+
+    --series-1: #3987e5;
+    --series-2: #008300;
+    --series-3: #d55181;
+    --series-4: #c98500;
+    --series-5: #199e70;
+    --series-6: #d95926;
+    --series-7: #9085e9;
+    --series-8: #e66767;
+
+    --good: #0ca30c;
+    --warning: #fab219;
+    --serious: #ec835a;
+    --critical: #d03b3b;
+
+    --bull: #0ca30c;
+    --bear: #e66767;
+  }
+}
+
+/* 主題切換鈕明確指定深色時，必須贏過作業系統的淺色設定 */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --page: #0e1013;
+  --surface: #16181d;
+  --surface-sunken: #1c1f26;
+  --ink: #f5f6f8;
+  --ink-secondary: #a8b0bf;
+  --ink-muted: #767e8f;
+  --line: #262a33;
+  --line-strong: #363b47;
+
+  --accent: #3987e5;
+  --accent-hover: #5598e7;
+  --accent-wash: #16233a;
+
+  --series-1: #3987e5;
+  --series-2: #008300;
+  --series-3: #d55181;
+  --series-4: #c98500;
+  --series-5: #199e70;
+  --series-6: #d95926;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+
+  --good: #0ca30c;
+  --warning: #fab219;
+  --serious: #ec835a;
+  --critical: #d03b3b;
+
+  --bull: #0ca30c;
+  --bear: #e66767;
+}
+
 @layer base {
-  /* 自訂全局字體設置 */
   html {
     @apply scroll-smooth;
   }
 
   body {
-    @apply bg-slate-50 text-slate-900 antialiased;
+    @apply bg-page text-ink antialiased;
+    font-family: var(--font-sans);
   }
 
-  /* 標題樣式 */
   h1, h2, h3, h4, h5, h6 {
-    @apply font-semibold text-slate-900;
+    @apply font-semibold text-ink;
+  }
+
+  /* 數字表格與軸標籤需要等寬對齊；獨立大數字維持比例字距較好看 */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* 統一的鍵盤焦點樣式 — 面試作品的無障礙基本盤 */
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-accent;
+  }
+
+  ::selection {
+    background: var(--accent-wash);
+    color: var(--ink);
   }
 }
 
-/**
- * 自訂動畫定義
- */
 @layer utilities {
-  /**
-   * 漸淡進入動畫
-   */
   .animate-fade-in {
-    animation: fadeIn 0.5s ease-in;
+    animation: fadeIn 0.3s ease-out;
   }
 
-  /**
-   * 定義漸淡進入動畫
-   */
   @keyframes fadeIn {
-    from {
-      opacity: 0;
-    }
-    to {
-      opacity: 1;
-    }
+    from { opacity: 0; }
+    to   { opacity: 1; }
   }
 
-  /**
-   * 上升進入動畫
-   */
   .animate-slide-up {
-    animation: slideUp 0.5s ease-out;
+    animation: slideUp 0.3s ease-out;
   }
 
-  /**
-   * 定義上升進入動畫
-   */
   @keyframes slideUp {
-    from {
-      transform: translateY(10px);
-      opacity: 0;
-    }
-    to {
-      transform: translateY(0);
-      opacity: 1;
+    from { transform: translateY(8px); opacity: 0; }
+    to   { transform: translateY(0);   opacity: 1; }
+  }
+
+  /* 尊重使用者的減少動態偏好設定 */
+  @media (prefers-reduced-motion: reduce) {
+    .animate-fade-in,
+    .animate-slide-up {
+      animation: none;
     }
   }
 }

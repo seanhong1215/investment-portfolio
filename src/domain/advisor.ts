@@ -324,24 +324,26 @@ export function getRecommendation(profile: InvestorProfile): PortfolioRecommenda
 }
 
 // ===== 輔助資訊 =====
+// 這裡只放文字。圖示屬於呈現層，由頁面自行對應 lucide icon —
+// 領域層混入 emoji 會讓它被綁死在特定的 UI 呈現方式上。
 
-export const GOAL_INFO: Record<InvestGoal, { label: string; icon: string; hint: string }> = {
-  RETIREMENT: { label: '退休準備',   icon: '🏖️', hint: '打造退休後的穩定現金流' },
-  HOME:       { label: '購屋頭期款', icon: '🏠', hint: '累積足夠的房屋頭期款' },
-  FREEDOM:    { label: '財務自由',   icon: '🦅', hint: '讓被動收入超過生活支出' },
-  EDUCATION:  { label: '子女教育',   icon: '🎓', hint: '為子女的教育費用做準備' },
-  EMERGENCY:  { label: '緊急備用金', icon: '🛡️', hint: '建立 6-12 個月的生活費緩衝' },
+export const GOAL_INFO: Record<InvestGoal, { label: string; hint: string }> = {
+  RETIREMENT: { label: '退休準備',   hint: '打造退休後的穩定現金流' },
+  HOME:       { label: '購屋頭期款', hint: '累積足夠的房屋頭期款' },
+  FREEDOM:    { label: '財務自由',   hint: '讓被動收入超過生活支出' },
+  EDUCATION:  { label: '子女教育',   hint: '為子女的教育費用做準備' },
+  EMERGENCY:  { label: '緊急備用金', hint: '建立 6-12 個月的生活費緩衝' },
 }
 
-export const TIME_INFO: Record<TimeHorizon, { label: string; range: string }> = {
-  SHORT:     { label: '1 ~ 3 年', range: 'SHORT' },
-  MEDIUM:    { label: '3 ~ 5 年', range: 'MEDIUM' },
-  LONG:      { label: '5 ~ 10 年', range: 'LONG' },
-  VERY_LONG: { label: '10 年以上', range: 'VERY_LONG' },
+export const TIME_INFO: Record<TimeHorizon, { label: string }> = {
+  SHORT:     { label: '1 ~ 3 年' },
+  MEDIUM:    { label: '3 ~ 5 年' },
+  LONG:      { label: '5 ~ 10 年' },
+  VERY_LONG: { label: '10 年以上' },
 }
 
-export const RISK_INFO: Record<RiskLevel, { label: string; icon: string; desc: string }> = {
-  CONSERVATIVE: { label: '保守',  icon: '🛡️', desc: '接受較低報酬，避免大幅波動。市場下跌 20% 時會非常不安。' },
-  BALANCED:     { label: '平衡',  icon: '⚖️', desc: '接受適度波動換取合理報酬。市場下跌能持有，但超過 30% 會考慮調整。' },
-  AGGRESSIVE:   { label: '積極',  icon: '🚀', desc: '接受大幅波動換取長期高報酬。市場下跌 40% 仍能堅定持有甚至加碼。' },
+export const RISK_INFO: Record<RiskLevel, { label: string; desc: string }> = {
+  CONSERVATIVE: { label: '保守', desc: '接受較低報酬，避免大幅波動。市場下跌 20% 時會非常不安。' },
+  BALANCED:     { label: '平衡', desc: '接受適度波動換取合理報酬。市場下跌能持有，但超過 30% 會考慮調整。' },
+  AGGRESSIVE:   { label: '積極', desc: '接受大幅波動換取長期高報酬。市場下跌 40% 仍能堅定持有甚至加碼。' },
 }
