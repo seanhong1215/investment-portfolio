@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # 型別檢查獨立一步，失敗時能直接看出是型別問題而非測試問題
+      - name: Type check
+        run: npm run type-check
+
+      # 覆蓋率門檻只設在 domain 與 alphaVantage 兩層（見 vite.config.ts），
+      # 未達門檻時這一步會失敗
+      - name: Unit tests with coverage
+        run: npm run test:coverage
+
+      - name: Production build
+        run: npm run build

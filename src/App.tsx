@@ -3,6 +3,7 @@ import { AlertTriangle, X } from 'lucide-react'
 import Navigation, { type Page } from '@/components/Navigation'
 import { Button } from '@/components/ui'
 import { usePortfolioStore } from '@/stores/portfolioStore'
+import { DISCLAIMER } from '@/domain/buffett'
 import { useStorageStatusStore } from '@/stores/storageStatusStore'
 import HomePage from '@/pages/HomePage'
 import BuffettPage from '@/pages/BuffettPage'
@@ -81,7 +82,24 @@ function App() {
       {currentPage === 'builder' && <PortfolioBuilderPage />}
       {currentPage === 'portfolios' && <HomePage isLoading={isLoading} />}
       {currentPage === 'research' && <BuffettPage />}
+
+      <DisclaimerFooter />
     </div>
+  )
+}
+
+/**
+ * 免責聲明放在應用層級而非單一頁面，因為三個頁面都會輸出建議形狀的內容
+ * （配置建議、評級、買點訊號）。文字取自 domain 的單一常數，避免各頁
+ * 各寫一版、改了一處漏了兩處。
+ */
+function DisclaimerFooter() {
+  return (
+    <footer className="border-t border-line bg-surface">
+      <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+        <p className="text-xs leading-relaxed text-ink-muted">{DISCLAIMER}</p>
+      </div>
+    </footer>
   )
 }
 

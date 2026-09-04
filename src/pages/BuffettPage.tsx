@@ -12,16 +12,20 @@
 import { useState } from 'react'
 import {
   AlertTriangle, Check, ChevronDown, ChevronUp, Info, Minus,
-  PencilLine, Search, Shield, Target, TrendingUp, Wifi, X, Zap,
+  HelpCircle, PencilLine, Search, Shield, Target, TrendingUp, Wifi, X, Zap,
 } from 'lucide-react'
-import { stockAPIService } from '@/services/stockAPI'
-import { analyzeBuffett, calcBuySignals, calcFairValue } from '@/domain/buffett'
+import { alphaVantageClient, AlphaVantageError } from '@/services/alphaVantage'
+import {
+  analyzeBuffett, calcBuySignals, calcFairValue, resolvePrice,
+  MIN_RATABLE_WEIGHT, CRITERION_WEIGHTS,
+} from '@/domain/buffett'
+import type { CriterionKey } from '@/domain/buffett'
 import { Button, Card, Badge, EmptyState } from '@/components/ui'
 import { formatSignedPercent } from '@/utils/format'
 import { cn } from '@/utils/cn'
 import type {
   BuffettAnalysis, BuffettCriterion, BuySignal, BuySignalResult,
-  CompanyOverview, FairValueResult,
+  CompanyOverview, FairValueResult, Fundamental, PriceQuote,
 } from '@/types'
 
 // ── 手動輸入 ──
@@ -53,28 +57,44 @@ const EMPTY_FORM: ManualForm = {
   week52High: '', week52Low: '', movingAvg200: '', analystTargetPrice: '',
 }
 
+/**
+ * 表單欄位 → 基本面數值。
+ *
+ * 空欄位是 `null`（沒填），不是 0。這與 API adapter 遵循同一條規則：
+ * 沒填的負債比不該被當成「零負債」而拿滿分，它應該退出計分。
+ */
+function parseField(value: string): Fundamental {
+  const trimmed = value.trim()
+  if (trimmed === '') return null
+  const parsed = Number.parseFloat(trimmed)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
 function formToOverview(form: ManualForm): CompanyOverview {
-  const p = (v: string) => parseFloat(v) || 0
+  const p = parseField
   return {
     symbol: form.symbol.toUpperCase(),
     name: form.name || form.symbol.toUpperCase(),
-    sector: '', industry: '', marketCap: 0,
+    sector: '', industry: '',
+    source: 'manual',
+    retrievedAt: Date.now(),
+    marketCap: null,
     peRatio: p(form.peRatio),
     pegRatio: p(form.pegRatio),
     roe: p(form.roe),
     debtToEquity: p(form.debtToEquity),
     profitMargin: p(form.profitMargin),
-    operatingMargin: 0,
-    revenueGrowthYOY: 0,
+    operatingMargin: null,
+    revenueGrowthYOY: null,
     earningsGrowthYOY: p(form.earningsGrowthYOY),
     dividendYield: p(form.dividendYield),
     bookValue: p(form.bookValue),
-    priceToBook: 0,
+    priceToBook: null,
     eps: p(form.eps),
     currentRatio: p(form.currentRatio),
     week52High: p(form.week52High),
     week52Low: p(form.week52Low),
-    movingAvg50: 0,
+    movingAvg50: null,
     movingAvg200: p(form.movingAvg200),
     analystTargetPrice: p(form.analystTargetPrice),
   }
@@ -118,7 +138,14 @@ function ManualInputForm({ onAnalyze }: { onAnalyze: (ov: CompanyOverview) => vo
   const set = (key: keyof ManualForm) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((prev) => ({ ...prev, [key]: e.target.value }))
 
-  const canSubmit = form.symbol.trim() !== '' && parseFloat(form.roe) > 0 && parseFloat(form.peRatio) > 0
+  // 送出門檻直接綁 domain 的權重表與評級門檻，而不是「填滿某幾個欄位」。
+  // 否則使用者填完表單、卻拿到一個「資料不足，不予評級」的結果 —— 那是
+  // 表單與計分規則各說各話造成的，不是使用者的錯。
+  const filledWeight = (Object.keys(CRITERION_WEIGHTS) as CriterionKey[]).reduce(
+    (sum, key) => (parseField(form[key]) !== null ? sum + CRITERION_WEIGHTS[key] : sum),
+    0,
+  )
+  const canSubmit = form.symbol.trim() !== '' && filledWeight >= MIN_RATABLE_WEIGHT
 
   return (
     <form
@@ -136,7 +163,16 @@ function ManualInputForm({ onAnalyze }: { onAnalyze: (ov: CompanyOverview) => vo
       </div>
 
       <div>
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-muted">巴菲特分析必填（6 項）</p>
+        <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+          <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">評分指標（六項，各有權重）</p>
+          <p className="text-xs tabular text-ink-muted">
+            已填權重 <strong className={cn('font-semibold', canSubmit ? 'text-good' : 'text-ink')}>{filledWeight}</strong>
+            {' / '}需 {MIN_RATABLE_WEIGHT} 才能評級
+          </p>
+        </div>
+        <p className="mb-2 text-xs text-ink-muted">
+          留空的欄位不會被當成 0，而是排除在評分之外 —— 不確定的數字請留空，不要猜。
+        </p>
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="ROE 股東權益報酬率 (%)" value={form.roe} onChange={set('roe')} placeholder="25.0" />
           <Field label="負債股權比 D/E (倍)" value={form.debtToEquity} onChange={set('debtToEquity')} placeholder="0.50" />
@@ -204,7 +240,7 @@ function scoreTone(score: number): Tone {
 }
 
 const GRADE_TONE: Record<BuffettAnalysis['grade'], Tone> = {
-  A: 'good', B: 'accent', C: 'warning', D: 'warning', F: 'critical',
+  A: 'good', B: 'accent', C: 'warning', D: 'warning', F: 'critical', NR: 'warning',
 }
 
 const RECOMMENDATION_LABEL: Record<BuffettAnalysis['recommendation'], { label: string; tone: Tone }> = {
@@ -212,10 +248,11 @@ const RECOMMENDATION_LABEL: Record<BuffettAnalysis['recommendation'], { label: s
   BUY: { label: '可以買進', tone: 'accent' },
   HOLD: { label: '持有觀望', tone: 'warning' },
   AVOID: { label: '避免投資', tone: 'critical' },
+  INSUFFICIENT_DATA: { label: '資料不足，不予評級', tone: 'warning' },
 }
 
 const MOAT_LABEL: Record<BuffettAnalysis['moatStrength'], string> = {
-  WIDE: '寬護城河', NARROW: '窄護城河', NONE: '護城河不明顯',
+  WIDE: '寬護城河', NARROW: '窄護城河', NONE: '護城河不明顯', UNKNOWN: '護城河無從判斷',
 }
 
 function ScoreBar({ score, weight }: { score: number; weight: number }) {
@@ -238,13 +275,19 @@ function ScoreBar({ score, weight }: { score: number; weight: number }) {
 function CriterionCard({ criterion }: { criterion: BuffettCriterion }) {
   const [showInfo, setShowInfo] = useState(false)
 
+  // 「無資料」是第三種狀態，不能和「未通過」共用同一個叉叉 —— 那會讓
+  // 使用者以為這家公司在這一項不及格，實際上是這一項根本沒被評分。
+  const statusIcon = !criterion.available
+    ? <HelpCircle className="h-4 w-4 shrink-0 text-ink-muted" aria-label="無資料" />
+    : criterion.pass
+      ? <Check className="h-4 w-4 shrink-0 text-good" aria-label="通過" />
+      : <X className="h-4 w-4 shrink-0 text-ink-muted" aria-label="未通過" />
+
   return (
-    <div className="rounded-lg border border-line p-4">
+    <div className={cn('rounded-lg border p-4', criterion.available ? 'border-line' : 'border-dashed border-line')}>
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2">
-          {criterion.pass
-            ? <Check className="h-4 w-4 shrink-0 text-good" aria-hidden />
-            : <X className="h-4 w-4 shrink-0 text-ink-muted" aria-hidden />}
+          {statusIcon}
           <span className="text-sm font-medium">{criterion.name}</span>
           <button
             type="button"
@@ -264,7 +307,13 @@ function CriterionCard({ criterion }: { criterion: BuffettCriterion }) {
       {showInfo && <p className="mt-2 pl-6 text-xs text-ink-muted">{criterion.description}</p>}
 
       <div className="mt-2 pl-6">
-        <ScoreBar score={criterion.score} weight={criterion.weight} />
+        {criterion.available ? (
+          <ScoreBar score={criterion.score} weight={criterion.weight} />
+        ) : (
+          <p className="text-xs text-ink-muted">
+            資料缺漏，本項 {criterion.weight} 分權重已排除於評分之外（未計零分）
+          </p>
+        )}
         <p className="mt-1 text-xs text-ink-muted">標準：{criterion.benchmark}</p>
       </div>
     </div>
@@ -290,6 +339,24 @@ const FAIR_VALUE_VERDICT: Record<FairValueResult['verdict'], { label: string; to
   FAIR: { label: '合理估值區間', tone: 'accent' },
   OVERVALUED: { label: '略微高估，可等回調', tone: 'warning' },
   EXPENSIVE: { label: '嚴重高估，風險極高', tone: 'critical' },
+  NO_PRICE: { label: '無比價基準，不判斷貴賤', tone: 'warning' },
+}
+
+/**
+ * 價格來源標籤。
+ *
+ * 推導價（P/E × EPS）與即時報價的可信度差很多，畫面上必須看得出差別 ——
+ * 把兩者都寫成「現價」會讓使用者拿季報級的舊價格當成此刻的市價來判讀。
+ */
+function PriceBasisNote({ price }: { price: PriceQuote }) {
+  return price.basis === 'quote' ? (
+    <>即時報價 ${price.value.toFixed(2)}</>
+  ) : (
+    <>
+      推導價 ${price.value.toFixed(2)}
+      <span className="text-ink-muted">（P/E × EPS，非即時市價，可能落後數日）</span>
+    </>
+  )
 }
 
 function FairValueSection({ fairValue }: { fairValue: FairValueResult }) {
@@ -313,7 +380,9 @@ function FairValueSection({ fairValue }: { fairValue: FairValueResult }) {
       <div className="mt-3 flex items-center justify-between rounded-lg border border-line bg-surface px-4 py-3">
         <span className={cn('font-medium', TONE_TEXT[verdict.tone])}>{verdict.label}</span>
         <span className="text-sm tabular text-ink-secondary">
-          {formatSignedPercent(fairValue.premiumDiscount, 1)} 溢／折價
+          {fairValue.premiumDiscount === null
+            ? '需要價格才能計算溢／折價'
+            : `${formatSignedPercent(fairValue.premiumDiscount, 1)} 溢／折價`}
         </span>
       </div>
 
@@ -336,9 +405,9 @@ function FairValueSection({ fairValue }: { fairValue: FairValueResult }) {
         <p className="mt-1 text-xs text-ink-muted">合理中間值 × 75%，低於此價買入安全邊際充足</p>
       </div>
 
-      {fairValue.marketPrice > 0 && (
-        <p className="mt-3 text-center text-xs text-ink-muted">
-          以隱含現價 ${fairValue.marketPrice.toFixed(2)}（P/E × EPS 推算）為基準
+      {fairValue.price && (
+        <p className="mt-3 text-center text-xs text-ink-secondary">
+          比價基準：<PriceBasisNote price={fairValue.price} />
         </p>
       )}
     </Card>
@@ -356,10 +425,11 @@ const SIGNAL_SUBTITLE: Record<string, string> = {
 }
 
 const SIGNAL_VERDICT: Record<BuySignalResult['verdict'], { label: string; tone: Tone }> = {
-  STRONG_BUY: { label: '強力進場訊號', tone: 'good' },
-  CONSIDER: { label: '可分批布局', tone: 'accent' },
+  STRONG_BUY: { label: '多數訊號偏正向', tone: 'good' },
+  CONSIDER: { label: '部分訊號偏正向', tone: 'accent' },
   WAIT: { label: '訊號不足，繼續觀察', tone: 'warning' },
-  AVOID: { label: '目前不建議進場', tone: 'critical' },
+  AVOID: { label: '訊號全數未達標', tone: 'critical' },
+  INSUFFICIENT_DATA: { label: '可評訊號太少，不下結論', tone: 'warning' },
 }
 
 function TierRow({ tiers }: { tiers: { label: string; price: number; note: string; active?: boolean }[] }) {
@@ -379,31 +449,32 @@ function TierRow({ tiers }: { tiers: { label: string; price: number; note: strin
   )
 }
 
-function ActionPlan({ verdict, impliedPrice, untriggered }: {
+function ActionPlan({ verdict, price, untriggered }: {
   verdict: BuySignalResult['verdict']
-  impliedPrice: number
+  price: PriceQuote
   untriggered: BuySignal[]
 }) {
-  const t2 = impliedPrice * 0.95
-  const t3 = impliedPrice * 0.9
+  const base = price.value
 
   if (verdict === 'STRONG_BUY' || verdict === 'CONSIDER') {
-    const first = verdict === 'STRONG_BUY' ? '直接市價下單' : '先買 1/3 試水'
     return (
       <div className="mt-4 space-y-3 border-t border-line pt-4">
-        <p className="text-sm font-medium">建議進場方式</p>
+        <p className="text-sm font-medium">分批進場的參考價位</p>
         <TierRow
           tiers={[
-            { label: '第一批（現在）', price: impliedPrice, note: first, active: true },
-            { label: '第二批（等待）', price: t2, note: '跌 5% 加碼' },
-            { label: '第三批（等待）', price: t3, note: '跌 10% 加碼' },
+            { label: '第一批', price: base, note: '基準價位', active: true },
+            { label: '第二批', price: base * 0.95, note: '回檔 5%' },
+            { label: '第三批', price: base * 0.9, note: '回檔 10%' },
           ]}
         />
+        <p className="text-xs text-ink-muted">
+          分批是為了攤平進場成本、降低單一時點的判斷風險，並非對股價走勢的預測。
+        </p>
       </div>
     )
   }
 
-  if (verdict === 'WAIT' && untriggered.length > 0) {
+  if ((verdict === 'WAIT' || verdict === 'INSUFFICIENT_DATA') && untriggered.length > 0) {
     return (
       <div className="mt-4 space-y-2 border-t border-line pt-4">
         <p className="text-sm font-medium">等待以下條件改善再考慮進場</p>
@@ -438,7 +509,11 @@ function BuySignalSection({ signals }: { signals: BuySignalResult }) {
       <div className="flex items-center gap-2">
         <Zap className={cn('h-4 w-4', TONE_TEXT[verdict.tone])} aria-hidden />
         <h3 className="text-sm font-semibold">買點訊號評估</h3>
-        <span className="ml-auto text-xs text-ink-muted">基於 P/E × EPS 隱含現價</span>
+        {signals.price && (
+          <span className="ml-auto text-xs text-ink-secondary">
+            <PriceBasisNote price={signals.price} />
+          </span>
+        )}
       </div>
 
       <div className="mt-3 flex items-center justify-between rounded-lg border border-line bg-surface px-4 py-3">
@@ -478,10 +553,10 @@ function BuySignalSection({ signals }: { signals: BuySignalResult }) {
         </p>
       )}
 
-      {signals.impliedPrice > 0 && (
+      {signals.price && (
         <ActionPlan
           verdict={signals.verdict}
-          impliedPrice={signals.impliedPrice}
+          price={signals.price}
           untriggered={signals.signals.filter((s) => !s.triggered)}
         />
       )}
@@ -494,20 +569,30 @@ function BuySignalSection({ signals }: { signals: BuySignalResult }) {
 type Mode = 'api' | 'manual'
 const EXAMPLE_SYMBOLS = ['AAPL', 'COST', 'BRK.B', 'V', 'MSFT', 'KO']
 
+/** 錯誤狀態同時記住「能不能靠手動輸入繞過」，UI 才不必去比對錯誤訊息字串 */
+interface AnalysisError {
+  message: string
+  recoverableByManualInput: boolean
+}
+
 export function BuffettPage() {
   const [mode, setMode] = useState<Mode>('api')
   const [symbol, setSymbol] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<AnalysisError | null>(null)
   const [result, setResult] = useState<BuffettAnalysis | null>(null)
   const [buySignals, setBuySignals] = useState<BuySignalResult | null>(null)
   const [fairValue, setFairValue] = useState<FairValueResult | null>(null)
 
+  /**
+   * 三份結果共用同一個 price，確保「合理價的溢折價」與「52 週位置」
+   * 是對同一個價格算出來的 —— 各自算一次遲早會分岔。
+   */
   const runAnalysis = (ov: CompanyOverview) => {
-    const impliedPrice = ov.peRatio > 0 && ov.eps > 0 ? ov.peRatio * ov.eps : 0
+    const price = resolvePrice(ov)
     setResult(analyzeBuffett(ov))
-    setBuySignals(calcBuySignals(ov))
-    setFairValue(calcFairValue(ov, impliedPrice))
+    setBuySignals(calcBuySignals(ov, price))
+    setFairValue(calcFairValue(ov, price))
   }
 
   const resetResults = () => {
@@ -524,9 +609,13 @@ export function BuffettPage() {
     setIsLoading(true)
     resetResults()
     try {
-      runAnalysis(await stockAPIService.getCompanyOverview(target))
+      runAnalysis(await alphaVantageClient.getCompanyOverview(target))
     } catch (err) {
-      setError(err instanceof Error ? err.message : '獲取數據失敗')
+      setError(
+        err instanceof AlphaVantageError
+          ? { message: err.message, recoverableByManualInput: err.recoverableByManualInput }
+          : { message: err instanceof Error ? err.message : '取得資料失敗', recoverableByManualInput: true },
+      )
     } finally {
       setIsLoading(false)
     }
@@ -537,7 +626,8 @@ export function BuffettPage() {
     resetResults()
   }
 
-  const passingCount = result?.criteria.filter((c) => c.pass).length ?? 0
+  const ratableCriteria = result?.criteria.filter((c) => c.available) ?? []
+  const passingCount = ratableCriteria.filter((c) => c.pass).length
 
   return (
     <div>
@@ -608,10 +698,10 @@ export function BuffettPage() {
               <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-critical" aria-hidden />
               <div>
                 <p className="font-medium text-critical">無法分析</p>
-                {error.split('\n').map((line, i) => (
+                {error.message.split('\n').map((line, i) => (
                   <p key={i} className="mt-1 text-sm text-ink-secondary">{line}</p>
                 ))}
-                {!error.includes('ETF') && (
+                {error.recoverableByManualInput && (
                   <Button variant="ghost" size="sm" className="mt-2 -ml-2" onClick={() => switchMode('manual')}>
                     <PencilLine className="h-3.5 w-3.5" aria-hidden />
                     改用手動輸入（不需 API）
@@ -636,7 +726,7 @@ export function BuffettPage() {
                       {RECOMMENDATION_LABEL[result.recommendation].label}
                     </Badge>
                     <Badge>{MOAT_LABEL[result.moatStrength]}</Badge>
-                    {mode === 'manual' && <Badge tone="warning">手動輸入</Badge>}
+                    {result.source === 'manual' && <Badge tone="warning">手動輸入</Badge>}
                   </div>
                 </div>
                 <div className="text-center">
@@ -647,23 +737,42 @@ export function BuffettPage() {
                 </div>
               </div>
 
-              <div className="mt-6">
-                <div className="flex justify-between text-sm">
-                  <span className="text-ink-muted">綜合評分</span>
-                  <span className="font-semibold tabular">{result.totalScore} / 100</span>
-                </div>
-                <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-surface-sunken">
-                  {(() => {
-                    const barColor: Record<Tone, string> = { good: 'bg-good', accent: 'bg-accent', warning: 'bg-warning', critical: 'bg-critical' }
-                    return <div className={cn('h-full rounded-full', barColor[scoreTone(result.totalScore)])} style={{ width: `${result.totalScore}%` }} />
-                  })()}
-                </div>
-              </div>
+              {result.totalScore !== null ? (
+                <>
+                  <div className="mt-6">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-ink-muted">
+                        綜合評分
+                        <span className="ml-1 text-xs">（在 {result.completeness.availableWeight} 分可評權重上正規化）</span>
+                      </span>
+                      <span className="font-semibold tabular">{result.totalScore} / 100</span>
+                    </div>
+                    <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-surface-sunken">
+                      {(() => {
+                        const barColor: Record<Tone, string> = { good: 'bg-good', accent: 'bg-accent', warning: 'bg-warning', critical: 'bg-critical' }
+                        return <div className={cn('h-full rounded-full', barColor[scoreTone(result.totalScore)])} style={{ width: `${result.totalScore}%` }} />
+                      })()}
+                    </div>
+                  </div>
 
-              <p className="mt-4 flex items-center gap-2 text-sm text-ink-secondary">
-                <TrendingUp className="h-4 w-4 text-ink-muted" aria-hidden />
-                通過 <strong className="font-semibold text-ink">{passingCount}/{result.criteria.length}</strong> 項巴菲特標準
-              </p>
+                  <p className="mt-4 flex items-center gap-2 text-sm text-ink-secondary">
+                    <TrendingUp className="h-4 w-4 text-ink-muted" aria-hidden />
+                    通過 <strong className="font-semibold text-ink">{passingCount}/{ratableCriteria.length}</strong> 項可評的巴菲特標準
+                  </p>
+                </>
+              ) : (
+                <p className="mt-6 rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm">
+                  可評權重 {result.completeness.availableWeight} 分，未達發布評級所需的 {MIN_RATABLE_WEIGHT} 分，因此不給出分數。
+                </p>
+              )}
+
+              {/* 資料缺漏必須如實列出 —— 分數的可信度取決於它算在多少資料上 */}
+              {result.completeness.missing.length > 0 && (
+                <p className="mt-3 flex items-start gap-2 text-xs text-ink-muted">
+                  <HelpCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                  <span>未納入評分（資料缺漏）：{result.completeness.missing.join('、')}</span>
+                </p>
+              )}
 
               <p className="mt-3 rounded-lg bg-surface-sunken p-3 text-sm text-ink-secondary">{result.summary}</p>
             </Card>
@@ -683,9 +792,6 @@ export function BuffettPage() {
               </div>
             </div>
 
-            <p className="text-center text-xs text-ink-muted">
-              本分析僅供參考，不構成投資建議。請自行研究並承擔投資風險。
-            </p>
           </div>
         )}
 
