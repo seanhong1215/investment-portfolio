@@ -21,8 +21,7 @@
 
 ### 線上 Demo
 
-<!-- 部署完成後，把下面這行的 <DEMO_URL> 換成實際網址，並刪除這則註解 -->
-**<DEMO_URL>**
+**<https://investment-portfolio-liard.vercel.app/>**
 
 Demo 未設定任何金鑰，因此以「本地儲存 + 手動輸入」模式執行 —— 這正是零設定路徑的實際樣子。
 
