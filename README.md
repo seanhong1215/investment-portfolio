@@ -1,10 +1,23 @@
 # 投資組合分析 · Portfolio Analytics
 
+[![CI](https://github.com/seanhong1215/investment-portfolio/actions/workflows/ci.yml/badge.svg)](https://github.com/seanhong1215/investment-portfolio/actions/workflows/ci.yml)
+
 以核心衛星策略為主軸的投資組合分析工具。使用者可依目標與風險偏好產生個人化配置，
 追蹤各組合的損益與資產分佈，並用價值投資的指標分析個股是否值得買進、何時是合理買點。
 
 > React 19 · TypeScript · Vite · Zustand · Tailwind 4 · Vitest
-> 純前端（本地優先，可選 Firebase 雲端同步）· 深淺色雙主題 · 180 個單元測試
+> 純前端（本地優先，可選 Firebase 雲端同步）· 深淺色雙主題
+
+| | |
+|---|---|
+| 原始碼 | 5,596 行 / 40 檔（不含測試） |
+| 測試 | **180 個**，1,269 行 / 7 檔 |
+| 覆蓋率 | lines 99.6% · branches 94.4%（逐檔門檻 90 / 85） |
+| 主 bundle | 95 KB gzip（Firebase 106 KB 動態載入） |
+| 型別 | `strict` 全開，`tsc --noEmit` 零錯誤 |
+
+**零設定即可執行** —— 不需要 Firebase 或 Alpha Vantage 金鑰，儲存自動退回 IndexedDB、
+個股研究切換為手動輸入模式，功能完整。
 
 ---
 
