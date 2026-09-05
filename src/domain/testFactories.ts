@@ -54,13 +54,21 @@ export function makePortfolio(overrides: Partial<Portfolio> = {}): Portfolio {
   }
 }
 
-/** 預設值刻意設成一家「巴菲特會喜歡」的公司，測試再往下調成不及格 */
+/**
+ * 預設值刻意設成一家「巴菲特會喜歡」的公司，測試再往下調成不及格。
+ *
+ * 這裡每一項基本面都給了數值，代表「資料完整」的情境。要測缺漏資料的
+ * 行為就明確覆寫成 `null`（例如 `makeOverview({ currentRatio: null })`），
+ * 讓「缺漏」在測試裡是刻意寫出來的意圖，而不是忘了填欄位。
+ */
 export function makeOverview(overrides: Partial<CompanyOverview> = {}): CompanyOverview {
   return {
     symbol: 'KO',
     name: 'Coca-Cola',
     sector: 'Consumer Defensive',
     industry: 'Beverages',
+    source: 'manual',
+    retrievedAt: 0,
     marketCap: 260_000_000_000,
     peRatio: 24,
     pegRatio: 2.5,
