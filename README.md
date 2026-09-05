@@ -4,7 +4,7 @@
 追蹤各組合的損益與資產分佈，並用價值投資的指標分析個股是否值得買進、何時是合理買點。
 
 > React 19 · TypeScript · Vite · Zustand · Tailwind 4 · Vitest
-> 純前端（本地優先，可選 Firebase 雲端同步）· 深淺色雙主題 · 173 個單元測試
+> 純前端（本地優先，可選 Firebase 雲端同步）· 深淺色雙主題 · 180 個單元測試
 
 ---
 
@@ -199,8 +199,8 @@ Firebase SDK 打進主 bundle，即使使用者沒設定雲端。把環境判斷
 ```bash
 npm install
 npm run dev           # 開發（http://localhost:3000）
-npm test              # 執行 173 個單元測試
-npm run test:coverage # 覆蓋率（門檻：lines/functions 90%、branches 85%）
+npm test              # 執行 180 個單元測試
+npm run test:coverage # 覆蓋率（逐檔門檻：lines/functions 90%、branches 85%）
 npm run type-check    # 型別檢查
 npm run build         # 型別檢查 + 生產建置
 ```
@@ -222,11 +222,18 @@ npm run build         # 型別檢查 + 生產建置
 
 ## 測試策略
 
-覆蓋率門檻只設在兩層：
+覆蓋率門檻**逐檔套用**（`perFile: true`），只設在兩層：
 
 - **`domain/`** —— 財務計算，算錯會直接影響使用者的錢。
 - **`services/alphaVantage/`** —— 外部資料進入系統的唯一入口。這裡的錯誤（欄位名稱、
   單位換算、缺漏值語意）型別檢查攔不住，只會讓數字悄悄地不對。
+
+門檻逐檔而非只看聚合平均，是因為全域門檻會讓「All files 91%」蓋掉「`advisor.ts` 46%」——
+README 上宣稱的標準與實際不符，比覆蓋率低本身更糟。改成逐檔後，那 46% 的成因也浮現了：
+六個 `ETF_INFO[sym]?.name ?? sym` 形式的 fallback 永遠不會執行（`sym` 全部來自寫死的配置表）。
+把兩張表改成 `as const satisfies` 讓 key 成為字面量聯集後，查表是完全的，fallback 直接刪除 ——
+往配置表加入未登錄的代碼會變成**編譯錯誤**，而不是執行時悄悄顯示裸代碼加空白理由。
+光是刪掉死程式碼，branch 覆蓋率就從 46% 升到 86%。
 
 為了衝高整體數字去測 UI 樣式沒有意義。測試用 `testFactories.ts` 提供合理預設值，
 讓每條測試只需覆寫它真正在意的欄位；要測缺漏資料就明確寫 `null`，讓「缺漏」在測試裡
@@ -240,7 +247,8 @@ npm run build         # 型別檢查 + 生產建置
 - 合理估價三種公式的數值正確性（對照獨立計算），以及無比價基準時不判斷貴賤
 - adapter 層：`None` / 缺鍵 / `NaN` 一律成為 `null`、比率換算百分比、API 錯誤分類
 - client 層：併發節流、快取命中、失敗不寫入快取、一次失敗不影響後續請求
-- 所有「除以零／空組合／超額達成」的邊界狀況
+- 所有「除以零／空組合／超額達成」的邊界狀況，包含 `projectFV` 在年化 0% 時的
+  除以零退化路徑（該分支走不到公開 API，因此把函式匯出直接測，而不是留一段沒人驗證的防護）
 
 ---
 

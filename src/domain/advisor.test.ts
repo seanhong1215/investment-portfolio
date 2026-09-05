@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   getRecommendation,
+  projectFV,
   type InvestorProfile,
   type RiskLevel,
   type TimeHorizon,
@@ -127,5 +128,34 @@ describe('未來價值試算', () => {
     const expected = Math.round(20_000 * (1 + r) ** n + 500 * (((1 + r) ** n - 1) / r))
 
     expect(getRecommendation(profile).projections.year10).toBe(expected)
+  })
+})
+
+describe('projectFV', () => {
+  it('沒有本金與投入時未來價值為 0', () => {
+    expect(projectFV(0, 0, 7, 10)).toBe(0)
+  })
+
+  it('只有本金時等於單純複利（月複利 10 年）', () => {
+    // 1000 × (1 + 0.12/12)^120 = 1000 × 1.01^120
+    expect(projectFV(1000, 0, 12, 10)).toBeCloseTo(1000 * Math.pow(1.01, 120), 6)
+  })
+
+  it('只有月投入時等於年金終值', () => {
+    // 100 × ((1.01)^120 − 1) / 0.01
+    expect(projectFV(0, 100, 12, 10)).toBeCloseTo(100 * (Math.pow(1.01, 120) - 1) / 0.01, 6)
+  })
+
+  // 這是這個函式唯一的除以零邊界：r = 0 時 (…)/r 會得到 NaN，
+  // 而 NaN 一路渲染到畫面上就是「NaN 元」。
+  it('報酬率為 0 時退化成單純累加，而不是 NaN', () => {
+    const result = projectFV(1000, 100, 0, 10)
+
+    expect(Number.isNaN(result)).toBe(false)
+    expect(result).toBe(1000 + 100 * 120)
+  })
+
+  it('報酬率為 0 且無本金時等於總投入額', () => {
+    expect(projectFV(0, 500, 0, 3)).toBe(500 * 36)
   })
 })

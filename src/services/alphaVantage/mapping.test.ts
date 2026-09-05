@@ -207,6 +207,20 @@ describe('toStock', () => {
     expect(toStock(QUOTE_PAYLOAD, 'AAPL', 0).changePercent).toBeCloseTo(-0.5376, 10)
   })
 
+  it('漲跌幅若已是數字則直接採用（不假設一定是字串）', () => {
+    const payload = { 'Global Quote': { '05. price': '100', '10. change percent': 1.5 } }
+    expect(toStock(payload, 'AAPL', 0).changePercent).toBe(1.5)
+  })
+
+  it('漲跌欄位缺漏時退為 0 —— 這裡的 0 是「今日無變動」的合理預設', () => {
+    // 與基本面不同：報價缺漲跌幅不影響任何評分計算，顯示 0 不會誤導。
+    const payload = { 'Global Quote': { '05. price': '100' } }
+    const stock = toStock(payload, 'AAPL', 0)
+
+    expect(stock.change).toBe(0)
+    expect(stock.changePercent).toBe(0)
+  })
+
   it('Global Quote 為空物件時拋錯，而不是回傳一檔價格為 0 的股票', () => {
     expect(() => toStock({ 'Global Quote': {} }, 'AAPL', 0)).toThrow(AlphaVantageError)
   })

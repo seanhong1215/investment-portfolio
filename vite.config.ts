@@ -43,6 +43,10 @@ export default defineConfig({
         'src/domain/testFactories.ts',
         'src/services/alphaVantage/index.ts',
       ],
+      // 門檻逐檔套用，而非只看聚合平均。
+      // 全域門檻會讓「All files 91%」蓋掉「advisor.ts 46%」—— README 上
+      // 宣稱的標準與實際不符，比覆蓋率低本身更糟。
+      perFile: true,
       thresholds: { lines: 90, functions: 90, branches: 85, statements: 90 },
     },
   },

@@ -51,8 +51,16 @@ export interface PortfolioRecommendation {
 
 // ===== 投影計算 =====
 
-/** 未來價值：FV = PV*(1+r)^n + PMT*((1+r)^n-1)/r（月複利） */
-function projectFV(pv: number, monthly: number, annualRate: number, years: number): number {
+/**
+ * 未來價值：FV = PV*(1+r)^n + PMT*((1+r)^n-1)/r（月複利）
+ *
+ * 匯出是為了讓 r = 0 那條分支能被直接測到。年化 0% 在目前的
+ * RETURN_RANGE 下走不到，但公式本身在 r = 0 時會除以零得出 NaN，
+ * 那是屬於這個函式的邊界，該由測試守住而不是靠呼叫端剛好不觸發。
+ *
+ * @param annualRate 年化報酬率 %（例如 7 代表 7%）
+ */
+export function projectFV(pv: number, monthly: number, annualRate: number, years: number): number {
   const r = annualRate / 100 / 12
   const n = years * 12
   if (r === 0) return pv + monthly * n
@@ -61,7 +69,21 @@ function projectFV(pv: number, monthly: number, annualRate: number, years: numbe
 
 // ===== 配置模板 =====
 
-const ETF_INFO: Record<string, { name: string; reason: string }> = {
+interface SymbolInfo {
+  name: string
+  reason: string
+}
+
+/**
+ * `as const satisfies` 而非 `Record<string, …>`：前者讓 key 成為字面量聯集，
+ * 查表因此是**完全的**，不需要 `?.` 或 `?? fallback`。
+ *
+ * 這不只是少寫幾個字 —— 原本 `ETF_INFO[sym]?.name ?? sym` 的 fallback 永遠
+ * 不會執行（sym 全部來自 ALLOCATION_MAP），它唯一的作用是在有人往
+ * ALLOCATION_MAP 加入未登錄的代碼時，讓畫面**悄悄**顯示裸代碼 + 空白理由。
+ * 改成字面量聯集後，同樣的錯誤會變成編譯錯誤。
+ */
+const ETF_INFO = {
   VOO:  { name: 'Vanguard S&P 500',       reason: '追蹤美國前 500 大企業，長期年化約 10%，核心基石' },
   QQQ:  { name: 'Nasdaq 100',             reason: '科技成長導向，適合長期持有追求高報酬' },
   VTI:  { name: 'Vanguard 全美股市',       reason: '涵蓋美國全市場 3,700+ 支股票，最分散' },
@@ -70,9 +92,11 @@ const ETF_INFO: Record<string, { name: string; reason: string }> = {
   VGSH: { name: 'Vanguard 短期公債',       reason: '短期低風險，適合 1-3 年目標的防禦性配置' },
   VYM:  { name: 'Vanguard 高股息',         reason: '穩定股息收入，適合需要現金流的投資人' },
   SCHD: { name: 'Schwab 股息精選',         reason: '嚴選高品質股息股，歷史股息成長穩健' },
-}
+} as const satisfies Record<string, SymbolInfo>
 
-const STOCK_INFO: Record<string, { name: string; reason: string }> = {
+type EtfSymbol = keyof typeof ETF_INFO
+
+const STOCK_INFO = {
   MSFT: { name: 'Microsoft',    reason: '雲端（Azure）+ AI（Copilot），護城河極寬，ROE 持續 > 35%' },
   AAPL: { name: 'Apple',        reason: '品牌護城河 + 生態系鎖定，自由現金流豐沛' },
   GOOGL: { name: 'Alphabet',   reason: '廣告 + 雲端（GCP）+ AI，估值相對合理' },
@@ -81,13 +105,15 @@ const STOCK_INFO: Record<string, { name: string; reason: string }> = {
   PG:   { name: 'Procter & Gamble', reason: '消費必需品護城河，股息貴族，防禦性強' },
   NVDA: { name: 'Nvidia',       reason: 'AI 算力核心，成長爆發性強，適合積極型長期持有' },
   JPM:  { name: 'JPMorgan',     reason: '全球最大銀行之一，ROE 穩健，金融護城河' },
-}
+} as const satisfies Record<string, SymbolInfo>
+
+type StockSymbol = keyof typeof STOCK_INFO
 
 // ===== 核心推薦邏輯 =====
 
 type Key = `${RiskLevel}_${TimeHorizon}`
 
-const ALLOCATION_MAP: Record<Key, { etf: [string, number][]; stock: [string, number][] }> = {
+const ALLOCATION_MAP: Record<Key, { etf: [EtfSymbol, number][]; stock: [StockSymbol, number][] }> = {
   // 保守 × 短期 (<3年)：以債券為主，不建議個股
   CONSERVATIVE_SHORT: {
     etf: [['VGSH', 40], ['BND', 35], ['VOO', 25]],
@@ -268,7 +294,7 @@ const TITLE_MAP: Record<Key, string> = {
   AGGRESSIVE_VERY_LONG:   '巴菲特精選型',
 }
 
-const WARNING_MAP: Partial<Record<RiskLevel, string>> & { SHORT: string } = {
+const WARNING_MAP: Record<RiskLevel, string> & { SHORT: string } = {
   CONSERVATIVE: '保守配置降低波動，但長期報酬也相對有限。',
   BALANCED: '均衡配置適合大多數人，建議至少持有 5 年以上發揮複利效果。',
   AGGRESSIVE: '積極配置可能短期虧損 30-40%，需要強大的心理承受力。請確認不會在下跌時賣出。',
@@ -285,29 +311,29 @@ export function getRecommendation(profile: InvestorProfile): PortfolioRecommenda
 
   const midReturn = (retMin + retMax) / 2
 
+  // 查表都是完全的（key 是字面量聯集），因此不需要 fallback。
+  // 加入未登錄的代碼會是編譯錯誤，而不是執行時悄悄顯示裸代碼。
   const etfCore: AllocationItem[] = alloc.etf.map(([sym, pct]) => ({
     symbol: sym,
-    name: ETF_INFO[sym]?.name ?? sym,
+    name: ETF_INFO[sym].name,
     percentage: pct,
     type: 'ETF',
-    reason: ETF_INFO[sym]?.reason ?? '',
+    reason: ETF_INFO[sym].reason,
   }))
 
   const stockSatellite: AllocationItem[] = alloc.stock.map(([sym, pct]) => ({
     symbol: sym,
-    name: STOCK_INFO[sym]?.name ?? sym,
+    name: STOCK_INFO[sym].name,
     percentage: pct,
     type: 'STOCK',
-    reason: STOCK_INFO[sym]?.reason ?? '',
+    reason: STOCK_INFO[sym].reason,
   }))
 
   const warning =
-    profile.timeHorizon === 'SHORT'
-      ? WARNING_MAP.SHORT
-      : WARNING_MAP[profile.riskLevel] ?? ''
+    profile.timeHorizon === 'SHORT' ? WARNING_MAP.SHORT : WARNING_MAP[profile.riskLevel]
 
   return {
-    title: TITLE_MAP[key] ?? '個人化組合',
+    title: TITLE_MAP[key],
     description: `依據您的目標與風險偏好，為您推薦「${TITLE_MAP[key]}」配置。`,
     etfCore,
     stockSatellite,
