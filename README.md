@@ -7,6 +7,11 @@
 
 **Demo：<https://investment-portfolio-liard.vercel.app/>**
 
+![使用者流程：手動輸入指標，取得評分與資料完整度標示](docs/demo.gif)
+
+流程為手動輸入模式：填入六項指標中的五項、刻意留空流動比率，取得評分 79/100（在 90 分
+可評權重上正規化），留空的指標標示為「無資料」並排除於計分之外，而非計為零分。
+
 > React 19 · TypeScript · Vite · Zustand · Tailwind 4 · Vitest
 > 純前端（本地優先，可選 Firebase 雲端同步）· 深淺色雙主題
 
